@@ -1,0 +1,12 @@
+# Binaries
+/ties
+*.exe
+*.test
+*.out
+
+# ties workspace artifacts
+.ties/
+
+# OS / editor
+.DS_Store
+*.swp
