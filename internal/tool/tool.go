@@ -78,8 +78,15 @@ func DefaultRegistry(root string) *Registry {
 	r.Register(newGlobTool(root))
 	r.Register(newGrepTool(root))
 	r.Register(newBashTool(root))
+	r.Register(newMultieditTool(root))
+	r.Register(newPatchTool(root))
+	r.Register(newWebfetchTool())
 	return r
 }
+
+// NewTodoTool returns the planning todo tool. onChange (may be nil) is called
+// with the full list after every `set` so callers can render progress.
+func NewTodoTool(onChange func([]TodoItem)) Tool { return newTodoTool(onChange) }
 
 // decode unmarshals tool arguments into v, returning a friendly error.
 func decode(args json.RawMessage, v any) error {
