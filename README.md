@@ -14,6 +14,14 @@ frameworks. It compiles offline into a single static binary.
 
 ## Features
 
+- 🖱️ **Mouse-clickable home UI** — a beautiful full-screen launcher you can
+  drive with the mouse *or* the keyboard: click a menu item, scroll long lists
+  with the wheel, hover to highlight. Pick a model, add a provider or change
+  settings without typing a single command. Pure stdlib (no Bubble Tea), and it
+  gracefully falls back to a line menu where raw mode isn't available.
+- 🎛️ **Full customization built in** — manage everything from the UI: add
+  custom providers, set/rotate API keys and base URLs, add or remove model ids,
+  set the default model, build a fallback chain and switch themes.
 - 🔌 **Multi-provider** — Anthropic, OpenAI, Google Gemini and AWS Bedrock
   behind one streaming interface; adding a vendor is one file. Pick with
   `provider/model`.
@@ -150,11 +158,21 @@ The easiest way — just run it with no arguments:
 ties
 ```
 
-That opens an **interactive menu**. On first launch it walks you through a quick
-setup wizard (pick a provider, paste your API key), then drops you into a home
-menu where you can start a chat, run a one-off task, choose a model or manage
-keys. On Windows you can even double-click `ties.exe` — the menu keeps the
-window open instead of flashing and closing.
+That opens the **interactive home UI** — a mouse-clickable full-screen
+launcher. On first launch it walks you through a quick setup wizard (pick a
+provider, paste your API key), then drops you into a home screen where you can:
+
+- 🖱️ **click** any item (or use ↑/↓, `j`/`k`, number keys, Enter) to start a
+  chat, run a one-off task, choose a model, manage providers or change settings;
+- scroll long lists with the **mouse wheel**, hover to highlight, `Esc`/`q` to
+  go back;
+- add **custom providers & models**, set keys/base URLs, pick a default model,
+  build a fallback chain and switch themes — all without touching a config file.
+
+On Windows you can even double-click `ties.exe` — the menu keeps the window open
+instead of flashing and closing. Where a real terminal/raw mode isn't available
+(pipes, restricted consoles) it automatically falls back to a numbered line
+menu, so it always works.
 
 Prefer to drive it directly? It's two steps, just like Claude Code:
 
