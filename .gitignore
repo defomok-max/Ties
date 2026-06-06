@@ -4,6 +4,9 @@
 *.test
 *.out
 
+# release artifacts
+/dist/
+
 # ties workspace artifacts
 .ties/
 
