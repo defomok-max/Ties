@@ -213,6 +213,97 @@ func (s *Session) Render() string {
 	return b.String()
 }
 
+// Export renders the full transcript in a shareable format: "md" (Markdown,
+// the default) or "html" (a standalone, styled page).
+func (s *Session) Export(format string) (string, error) {
+	switch format {
+	case "", "md", "markdown":
+		return s.exportMarkdown(), nil
+	case "html":
+		return s.exportHTML(), nil
+	default:
+		return "", fmt.Errorf("unknown export format %q (want md or html)", format)
+	}
+}
+
+func (s *Session) exportMarkdown() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Ties session `%s`\n\n", s.Meta.ID)
+	fmt.Fprintf(&b, "- **Model:** %s\n- **Created:** %s\n\n---\n\n",
+		s.Meta.Model, s.Meta.Created.Format("2006-01-02 15:04 MST"))
+	for _, m := range s.Messages {
+		switch m.Role {
+		case provider.RoleUser:
+			fmt.Fprintf(&b, "### 🧑 User\n\n%s\n\n", m.Content)
+		case provider.RoleAssistant:
+			b.WriteString("### 🤖 Assistant\n\n")
+			if strings.TrimSpace(m.Content) != "" {
+				fmt.Fprintf(&b, "%s\n\n", m.Content)
+			}
+			for _, tc := range m.ToolCalls {
+				fmt.Fprintf(&b, "```tool\n%s(%s)\n```\n\n", tc.Name, string(tc.Arguments))
+			}
+		case provider.RoleTool:
+			tag := "result"
+			if m.IsError {
+				tag = "error"
+			}
+			fmt.Fprintf(&b, "<details><summary>↩︎ tool %s</summary>\n\n```\n%s\n```\n\n</details>\n\n", tag, m.Content)
+		}
+	}
+	return b.String()
+}
+
+func (s *Session) exportHTML() string {
+	var b strings.Builder
+	b.WriteString("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">")
+	fmt.Fprintf(&b, "<title>Ties session %s</title>", htmlEscape(s.Meta.ID))
+	b.WriteString("<style>" + exportCSS + "</style></head><body><main>")
+	fmt.Fprintf(&b, "<h1>Ties session <code>%s</code></h1>", htmlEscape(s.Meta.ID))
+	fmt.Fprintf(&b, "<p class=\"meta\">Model <b>%s</b> · %s</p>",
+		htmlEscape(s.Meta.Model), htmlEscape(s.Meta.Created.Format("2006-01-02 15:04 MST")))
+	for _, m := range s.Messages {
+		switch m.Role {
+		case provider.RoleUser:
+			fmt.Fprintf(&b, "<div class=\"turn user\"><div class=\"who\">🧑 User</div><pre>%s</pre></div>", htmlEscape(m.Content))
+		case provider.RoleAssistant:
+			b.WriteString("<div class=\"turn assistant\"><div class=\"who\">🤖 Assistant</div>")
+			if strings.TrimSpace(m.Content) != "" {
+				fmt.Fprintf(&b, "<pre>%s</pre>", htmlEscape(m.Content))
+			}
+			for _, tc := range m.ToolCalls {
+				fmt.Fprintf(&b, "<pre class=\"tool\">%s(%s)</pre>",
+					htmlEscape(tc.Name), htmlEscape(string(tc.Arguments)))
+			}
+			b.WriteString("</div>")
+		case provider.RoleTool:
+			cls := "toolresult"
+			if m.IsError {
+				cls += " error"
+			}
+			fmt.Fprintf(&b, "<div class=\"turn %s\"><pre>%s</pre></div>", cls, htmlEscape(m.Content))
+		}
+	}
+	b.WriteString("</main></body></html>")
+	return b.String()
+}
+
+const exportCSS = `body{background:#0d1117;color:#c9d1d9;font:15px/1.6 -apple-system,Segoe UI,Roboto,sans-serif;margin:0}` +
+	`main{max-width:820px;margin:0 auto;padding:32px 20px}` +
+	`h1{font-size:20px}code{background:#161b22;padding:1px 5px;border-radius:5px}` +
+	`.meta{color:#8b949e;margin-bottom:24px}` +
+	`.turn{border:1px solid #21262d;border-radius:10px;padding:12px 16px;margin:14px 0;background:#0f141a}` +
+	`.who{font-weight:600;margin-bottom:6px}` +
+	`.turn.user{background:#10171f}` +
+	`pre{white-space:pre-wrap;word-wrap:break-word;margin:6px 0;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}` +
+	`pre.tool{color:#79c0ff;background:#161b22;padding:8px 10px;border-radius:6px}` +
+	`.toolresult pre{color:#8b949e}.toolresult.error pre{color:#ff7b72}`
+
+func htmlEscape(s string) string {
+	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;")
+	return r.Replace(s)
+}
+
 func truncate(s string, n int) string {
 	s = strings.TrimSpace(s)
 	if len(s) <= n {
