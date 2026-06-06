@@ -28,14 +28,24 @@ func init() {
 		if base == "" {
 			base = defaultBaseURL
 		}
-		return &client{apiKey: o.APIKey, baseURL: strings.TrimRight(base, "/"), http: &http.Client{}}, nil
+		return &client{apiKey: o.APIKey, baseURL: strings.TrimRight(base, "/"), headers: o.Headers, http: &http.Client{}}, nil
 	})
 }
 
 type client struct {
 	apiKey  string
 	baseURL string
+	headers map[string]string
 	http    *http.Client
+}
+
+// endpoint returns the chat-completions URL, avoiding a doubled "/v1" when the
+// configured base already ends in "/v1" (common for Ollama and gateways).
+func (c *client) endpoint() string {
+	if strings.HasSuffix(c.baseURL, "/v1") {
+		return c.baseURL + "/chat/completions"
+	}
+	return c.baseURL + "/v1/chat/completions"
 }
 
 func (c *client) Name() string { return "openai" }
@@ -79,9 +89,6 @@ type wireRequest struct {
 
 // Stream implements provider.Provider.
 func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provider.StreamEvent, error) {
-	if c.apiKey == "" {
-		return nil, fmt.Errorf("openai: missing API key")
-	}
 	maxTok := req.MaxTokens
 	if maxTok <= 0 {
 		maxTok = defaultMaxTok
@@ -99,12 +106,17 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	if err != nil {
 		return nil, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/chat/completions", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint(), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	httpReq.Header.Set("content-type", "application/json")
-	httpReq.Header.Set("authorization", "Bearer "+c.apiKey)
+	if c.apiKey != "" {
+		httpReq.Header.Set("authorization", "Bearer "+c.apiKey)
+	}
+	for k, v := range c.headers {
+		httpReq.Header.Set(k, v)
+	}
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
