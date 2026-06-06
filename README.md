@@ -64,29 +64,92 @@ frameworks. It compiles offline into a single static binary.
 
 ## Install
 
+You only need **Go 1.23+** and **git**. There are no other dependencies — Ties
+builds offline into one static binary.
+
+**One command (recommended):**
+
 ```bash
 git clone https://github.com/defomok-max/Ties.git
 cd Ties
-go build -o ties ./cmd/ties
-# optionally: mv ties to a directory on your PATH
+make install          # builds and puts `ties` on your PATH
+```
+
+`make install` writes to `/usr/local/bin` (using `sudo` if needed). To install
+without sudo, pick a user dir on your PATH:
+
+```bash
+make install PREFIX=$HOME/.local      # installs to ~/.local/bin
+```
+
+**Or run the installer script** (same thing, no make required):
+
+```bash
+sh install.sh                  # or: PREFIX=$HOME/.local sh install.sh
+```
+
+**Or with the Go toolchain** (no clone needed):
+
+```bash
+go install github.com/defomok-max/Ties/cmd/ties@latest
+# the binary lands in $(go env GOPATH)/bin — make sure that's on your PATH
+```
+
+**Or just build the binary** and move it yourself:
+
+```bash
+make build            # produces ./ties
+./ties --help
+```
+
+Verify it's installed:
+
+```bash
+ties version
+ties --help
 ```
 
 ## Quick start
 
+Get going in two steps — it feels just like Claude Code:
+
 ```bash
-# 1. Add a provider key (stored in ~/.config/ties/ties.json) or use an env var
-ties auth login anthropic           # prompts for the key
+# 1. Add a provider key (stored in ~/.config/ties/ties.json) — pick any one:
+ties auth login anthropic           # prompts for the key, no echo
+#   …or just export an env var instead:
 export ANTHROPIC_API_KEY=sk-...     # or OPENAI_API_KEY / GEMINI_API_KEY
 
-# 2. One-shot task
+# 2. Start coding from the terminal:
+ties chat --tui                     # full-screen interactive agent
+```
+
+That's it. A few more ways to drive it:
+
+```bash
+# One-shot task in the current repo (it reads, edits and runs commands for you)
 ties run "add a --version flag and update the README"
 
-# 3. Interactive chat
+# Plain interactive chat (line UI instead of full-screen)
 ties chat
 
-# 4. Use a different model
+# Pick a different model on the fly
 ties run -m openai/gpt-4o "explain internal/agent/agent.go"
+
+# Let it work autonomously until the goal is verified done
+ties run -y --loop "make `go test ./...` pass"
 ```
+
+Tips for a smooth console experience:
+
+- `ties chat --tui` gives you the full-screen UI (header, scrollback, syntax
+  highlighting, live token/cost bar). On a pipe or non-TTY it falls back to the
+  plain line UI automatically.
+- Add `-y/--yes` to auto-approve tool calls when you trust the task; otherwise
+  Ties asks before editing files or running shell commands.
+- Colors honor `NO_COLOR` / `FORCE_COLOR`; themes via `--theme dark|light|mono`
+  or `TIES_THEME`.
+- Drop an `AGENTS.md` (or `CLAUDE.md` / `TIES.md`) in your repo — run
+  `ties init` to scaffold one — and Ties loads it as project context.
 
 ## Commands
 
@@ -245,6 +308,19 @@ Environment overrides: `TIES_MODEL`, `TIES_MAX_STEPS`, `TIES_THEME`,
 `/help` · `/tools` · `/skills` · `/context` · `/model` · `/usage` · `/clear` · `/exit`
 
 ## Development
+
+A `Makefile` wraps the common tasks (run `make help` to list them):
+
+```bash
+make build      # build ./ties with version info stamped in
+make test       # go test ./...
+make race       # race detector on the concurrent packages
+make lint       # gofmt + go vet + golangci-lint (if installed)
+make install    # build and install onto your PATH
+make clean      # remove build artifacts
+```
+
+Or the raw toolchain:
 
 ```bash
 go build ./...
