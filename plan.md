@@ -41,8 +41,8 @@ internal/
     resilient   retry+backoff wrapper + ordered model-fallback chain
   agent       ReAct loop: provider ⊕ tools ⊕ permission ⊕ session
   tool        Tool interface + registry + built-ins (read/write/edit/
-              multiedit/patch/list/glob/grep/bash/webfetch/todo),
-              FS confined to root
+              multiedit/patch/list/glob/grep/bash/webfetch/todo/task),
+              FS confined to root; `task` delegates to a sub-agent
   pricing     best-effort USD cost from an embedded price table
   permission  allow/ask/deny engine, deny-wins, glob patterns
   session     append-only JSONL transcripts (create/resume/list/show)
@@ -114,8 +114,9 @@ execution → final answer):
 - Done: tool output-truncation budget (`maxToolOutput`); `webfetch`
   (HTTP(S) GET → readable text); `patch` (unified-diff applier with context
   matching, line drift, create/delete); `multiedit` (atomic multi-replace on one
-  file); `todo` (in-run planning list rendered to the UI).
-- Planned: structured `tree`; per-tool timeouts.
+  file); `todo` (in-run planning list rendered to the UI); **per-tool timeouts**
+  (`toolTimeout`, wraps each tool call in a deadline context).
+- Planned: structured `tree`.
 
 ### 4.5 MCP depth ⬜
 - HTTP/SSE transport in addition to stdio; resources & prompts (not just tools);
@@ -125,15 +126,21 @@ execution → final answer):
 - `references/` + `scripts/` progressive disclosure; per-skill allowed tools;
   a `ties skill add` scaffolder; project vs. global vs. bundled precedence.
 
-### 4.7 Agent features (the "unique" layer) ⬜
-- **Sub-agents / pair-agents:** spawn a scoped agent for a subtask.
+### 4.7 Agent features (the "unique" layer) 🚧
+- ✅ **Sub-agents:** the `task` tool spawns a scoped child agent for a subtask —
+  shares provider/tools (minus `task`, no recursion)/permissions, fresh short
+  transcript, its own step cap, draws from and folds spend back into the
+  parent's remaining budget (`agent.RemainingBudget`/`AddSpent`).
 - **Ralph loops:** bounded autonomous "keep going until done/criteria" mode.
 - ✅ **Budgets:** hard token/$ ceilings per run with graceful stop —
   `maxCostUSD` / `maxTokens` config; the agent accounts usage after each turn
   and stops cleanly when a ceiling is reached (`agent.Budget`, `agent.Spent()`).
+- ✅ **Plan mode:** `--plan` makes a run read-only (mutating tools hard-denied
+  via `agent.DenyTools`, prompt augmented) so the agent proposes before editing.
+- ✅ **Session export:** `ties session export <id> --format md|html` renders a
+  shareable transcript (`session.Export`).
 - **TDD mode:** write test → run → implement → green loop.
-- **Voice in/out**, **session sharing/export** (markdown/html), **plan mode**
-  (read-only proposal before edits).
+- **Voice in/out** and **pair-agents** remain planned.
 
 ### 4.8 Quality & packaging ⬜
 - `--output json` for scripting; `--quiet`; non-interactive CI mode.
@@ -155,9 +162,10 @@ Code's extensibility story.
 **Resolved since the first slice.** The highest-leverage gaps are now shipped: a
 styled themed UI with spinner/diffs (§4.1), retries + model fallback (§4.2), a
 custom-provider system + cost/token metering and a **native Gemini provider**
-(§4.3), a full set of richer tools — `webfetch`, `patch`, `multiedit`, `todo`
-plus output truncation (§4.4), and per-run **token/$ budgets** with graceful
-stop (§4.7).
+(§4.3), a full set of richer tools — `webfetch`, `patch`, `multiedit`, `todo`,
+output truncation and per-tool timeouts (§4.4), and an agentic-depth layer:
+per-run **token/$ budgets**, **sub-agents** (`task`), read-only **plan mode**
+and **session export** (§4.7).
 
 **Gaps / risks to tackle next.** (1) The UI is still line-oriented, not a
 full-screen renderer — no scrollback management or syntax highlighting yet.
