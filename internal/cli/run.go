@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/defomok-max/Ties/internal/agent"
 	"github.com/defomok-max/Ties/internal/pricing"
@@ -26,6 +27,7 @@ type agentFlags struct {
 	maxSteps  int
 	theme     string
 	noColor   bool
+	plan      bool
 	rest      []string
 }
 
@@ -65,6 +67,8 @@ func parseAgentFlags(args []string) (agentFlags, error) {
 			f.theme = v
 		case "--no-color":
 			f.noColor = true
+		case "--plan":
+			f.plan = true
 		case "--max-steps":
 			v, err := next()
 			if err != nil {
@@ -320,7 +324,74 @@ func (a *app) newAgent(p provider.Provider, model string, sess *session.Session,
 	} else {
 		ag.Approve = a.approvePrompt
 	}
+	if a.cfg.ToolTimeout > 0 {
+		ag.ToolTimeout = time.Duration(a.cfg.ToolTimeout) * time.Second
+	}
+	if flags.plan {
+		ag.DenyTools = map[string]bool{
+			"write": true, "edit": true, "multiedit": true, "patch": true, "bash": true,
+		}
+		ag.System += planModeNote
+		a.ui.Println(a.ui.Warn("· plan mode — read-only, edits disabled"))
+	}
+	a.wireTask(ag, p, model, usage)
 	return ag
+}
+
+// wireTask installs the per-run spawn closure for the `task` sub-agent tool.
+// Each call builds a fresh child agent that shares the provider, model, tools
+// (minus `task` to prevent recursion), permissions and read-only/timeout policy
+// of the parent, draws from the parent's remaining budget, and folds its spend
+// back into the parent.
+func (a *app) wireTask(parent *agent.Agent, p provider.Provider, model string, usage *usageMeter) {
+	if a.task == nil {
+		return
+	}
+	a.task.spawn = func(ctx context.Context, desc, prompt string) (string, error) {
+		subReg := a.reg.Clone()
+		subReg.Unregister("task")
+
+		label := strings.TrimSpace(desc)
+		if label == "" {
+			label = firstLine(prompt)
+		}
+		a.ui.Println(a.ui.Accent("· task → " + truncateArgs(label)))
+
+		childSteps := parent.MaxSteps / 2
+		if childSteps < 4 {
+			childSteps = 4
+		}
+		var last strings.Builder
+		child := &agent.Agent{
+			Provider:      p,
+			Model:         model,
+			System:        a.system + subAgentNote,
+			Tools:         subReg,
+			Perm:          a.perm,
+			MaxSteps:      childSteps,
+			MaxToolOutput: a.cfg.MaxToolOutput,
+			Budget:        parent.RemainingBudget(),
+			EstimateCost:  pricing.Estimate,
+			ToolTimeout:   parent.ToolTimeout,
+			DenyTools:     parent.DenyTools,
+			Approve:       parent.Approve,
+			OnAssistantDone: func(text string) {
+				if strings.TrimSpace(text) != "" {
+					last.Reset()
+					last.WriteString(text)
+				}
+			},
+			OnUsage: func(u provider.Usage) {
+				usage.in += u.InputTokens
+				usage.out += u.OutputTokens
+			},
+		}
+		err := child.Run(ctx, prompt)
+		cusd, ctok := child.Spent()
+		parent.AddSpent(cusd, ctok)
+		a.ui.Println(a.ui.Dim("· task done"))
+		return last.String(), err
+	}
 }
 
 // previewEdit renders a colored diff for edit/write tool calls.
