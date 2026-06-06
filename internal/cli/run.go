@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -10,9 +11,11 @@ import (
 	"strings"
 
 	"github.com/defomok-max/Ties/internal/agent"
+	"github.com/defomok-max/Ties/internal/pricing"
 	"github.com/defomok-max/Ties/internal/provider"
 	"github.com/defomok-max/Ties/internal/session"
 	"github.com/defomok-max/Ties/internal/tool"
+	"github.com/defomok-max/Ties/internal/ui"
 )
 
 type agentFlags struct {
@@ -21,6 +24,8 @@ type agentFlags struct {
 	resume    string
 	noSession bool
 	maxSteps  int
+	theme     string
+	noColor   bool
 	rest      []string
 }
 
@@ -52,6 +57,14 @@ func parseAgentFlags(args []string) (agentFlags, error) {
 			f.resume = v
 		case "--no-session":
 			f.noSession = true
+		case "--theme":
+			v, err := next()
+			if err != nil {
+				return f, err
+			}
+			f.theme = v
+		case "--no-color":
+			f.noColor = true
 		case "--max-steps":
 			v, err := next()
 			if err != nil {
@@ -69,6 +82,19 @@ func parseAgentFlags(args []string) (agentFlags, error) {
 	return f, nil
 }
 
+// applyUITheme reconfigures the app printer from --theme / --no-color flags.
+func (a *app) applyUITheme(flags agentFlags) {
+	theme := a.cfg.Theme
+	if flags.theme != "" {
+		theme = flags.theme
+	}
+	color := ui.ColorEnabled(os.Stderr)
+	if flags.noColor {
+		color = false
+	}
+	a.ui = ui.New(os.Stderr, theme, color)
+}
+
 func cmdRun(args []string) error {
 	flags, err := parseAgentFlags(args)
 	if err != nil {
@@ -80,6 +106,7 @@ func cmdRun(args []string) error {
 		return err
 	}
 	defer a.close()
+	a.applyUITheme(flags)
 
 	p, model, err := a.buildProvider(flags.model)
 	if err != nil {
@@ -112,13 +139,15 @@ func cmdRun(args []string) error {
 		defer func() { _ = sess.Close() }()
 	}
 
-	ag := a.newAgent(p, model, sess, flags)
+	usage := &usageMeter{}
+	ag := a.newAgent(p, model, sess, flags, usage)
 	if err := ag.Run(ctx, input); err != nil {
 		return err
 	}
 	fmt.Println()
+	a.printUsage(model, usage)
 	if sess != nil {
-		fmt.Fprintf(os.Stderr, "\n[session %s]\n", sess.Meta.ID)
+		a.ui.Println(a.ui.Dim("session " + sess.Meta.ID))
 	}
 	return nil
 }
@@ -134,6 +163,7 @@ func cmdChat(args []string) error {
 		return err
 	}
 	defer a.close()
+	a.applyUITheme(flags)
 
 	p, model, err := a.buildProvider(flags.model)
 	if err != nil {
@@ -155,74 +185,169 @@ func cmdChat(args []string) error {
 	}
 	defer func() { _ = sess.Close() }()
 
-	ag := a.newAgent(p, model, sess, flags)
+	usage := &usageMeter{}
+	ag := a.newAgent(p, model, sess, flags, usage)
 
-	fmt.Printf("ties chat — model %s, session %s\nType your message. /exit to quit, /tools to list tools.\n\n", model, sess.Meta.ID)
+	a.ui.Banner("terminal AI coding agent")
+	a.ui.Printf(" %s  %s\n", a.ui.Heading("model"), model)
+	a.ui.Printf(" %s  %s\n", a.ui.Heading("session"), sess.Meta.ID)
+	a.ui.Println(a.ui.Dim(" /help for commands, /exit to quit"))
+
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 0, 64<<10), 4<<20)
 	for {
-		fmt.Print("\n> ")
+		a.ui.Print("\n" + a.ui.Accent("❯ "))
 		if !in.Scan() {
 			break
 		}
 		line := strings.TrimSpace(in.Text())
-		switch {
-		case line == "":
+		if line == "" {
 			continue
-		case line == "/exit" || line == "/quit":
-			return nil
-		case line == "/tools":
-			fmt.Println(strings.Join(a.reg.Names(), ", "))
+		}
+		if strings.HasPrefix(line, "/") {
+			if a.handleSlash(line, model, usage) {
+				return nil
+			}
 			continue
 		}
 		if err := ag.Run(ctx, line); err != nil {
-			fmt.Fprintln(os.Stderr, "error: "+err.Error())
+			a.ui.ErrorLine(err.Error())
 		}
 		fmt.Println()
 	}
 	return nil
 }
 
-// newAgent wires callbacks for streaming output and tool approval.
-func (a *app) newAgent(p provider.Provider, model string, sess *session.Session, flags agentFlags) *agent.Agent {
+// handleSlash processes a chat slash-command. It returns true to quit.
+func (a *app) handleSlash(line, model string, usage *usageMeter) bool {
+	switch strings.Fields(line)[0] {
+	case "/exit", "/quit":
+		return true
+	case "/help":
+		a.ui.Box("commands", strings.Join([]string{
+			"/help            show this help",
+			"/tools           list available tools",
+			"/skills          list discovered skills",
+			"/model           show the active model",
+			"/usage           show token usage & est. cost",
+			"/clear           clear the screen",
+			"/exit            quit",
+		}, "\n"))
+	case "/tools":
+		a.ui.Println(strings.Join(a.reg.Names(), ", "))
+	case "/skills":
+		if len(a.skills) == 0 {
+			a.ui.Println(a.ui.Dim("(no skills)"))
+		}
+		for _, s := range a.skills {
+			a.ui.Printf("%s  %s\n", a.ui.Heading(s.Name), a.ui.Dim(s.Description))
+		}
+	case "/model":
+		a.ui.Println(model)
+	case "/usage":
+		a.printUsage(model, usage)
+	case "/clear":
+		a.ui.Print("\x1b[2J\x1b[H")
+	default:
+		a.ui.Println(a.ui.Dim("unknown command; /help for the list"))
+	}
+	return false
+}
+
+// usageMeter accumulates token usage across turns.
+type usageMeter struct {
+	in  int
+	out int
+}
+
+func (a *app) printUsage(model string, u *usageMeter) {
+	if u.in == 0 && u.out == 0 {
+		return
+	}
+	line := fmt.Sprintf("tokens: %d in / %d out", u.in, u.out)
+	if cost, ok := pricing.Estimate(model, u.in, u.out); ok {
+		line += fmt.Sprintf("  ·  est. $%.4f", cost)
+	}
+	a.ui.Println(a.ui.Dim(line))
+}
+
+// newAgent wires callbacks for streaming output, tool approval and metering.
+func (a *app) newAgent(p provider.Provider, model string, sess *session.Session, flags agentFlags, usage *usageMeter) *agent.Agent {
 	maxSteps := a.cfg.MaxSteps
 	if flags.maxSteps > 0 {
 		maxSteps = flags.maxSteps
 	}
+	var spin *ui.Spinner
+	stopSpin := func() {
+		if spin != nil {
+			spin.Stop()
+			spin = nil
+		}
+	}
 	ag := &agent.Agent{
-		Provider: p,
-		Model:    model,
-		System:   a.system,
-		Tools:    a.reg,
-		Perm:     a.perm,
-		Session:  sess,
-		MaxSteps: maxSteps,
+		Provider:      p,
+		Model:         model,
+		System:        a.system,
+		Tools:         a.reg,
+		Perm:          a.perm,
+		Session:       sess,
+		MaxSteps:      maxSteps,
+		MaxToolOutput: a.cfg.MaxToolOutput,
 		OnText: func(delta string) {
+			stopSpin()
 			fmt.Print(delta)
 		},
 		OnToolStart: func(name, args string) {
-			fmt.Fprintf(os.Stderr, "\n\033[2m· %s %s\033[0m\n", name, truncateArgs(args))
+			stopSpin()
+			a.ui.ToolLine(name, a.ui.Dim(truncateArgs(args)))
+			a.previewEdit(name, args)
+			spin = a.ui.StartSpinner("working…")
 		},
-		OnToolResult: func(name string, res tool.Result) {
+		OnToolResult: func(_ string, res tool.Result) {
 			if res.IsError {
-				fmt.Fprintf(os.Stderr, "\033[31m  ✗ %s\033[0m\n", firstLine(res.Content))
+				a.ui.ErrorLine(firstLine(res.Content))
 			}
+		},
+		OnUsage: func(u provider.Usage) {
+			usage.in += u.InputTokens
+			usage.out += u.OutputTokens
 		},
 	}
 	if flags.yes {
 		ag.Approve = func(_, _ string) bool { return true }
 	} else {
-		ag.Approve = approvePrompt
+		ag.Approve = a.approvePrompt
 	}
 	return ag
 }
 
-func approvePrompt(name, target string) bool {
-	fmt.Fprintf(os.Stderr, "\n\033[33mAllow %s", name)
-	if target != "" {
-		fmt.Fprintf(os.Stderr, " (%s)", truncateArgs(target))
+// previewEdit renders a colored diff for edit/write tool calls.
+func (a *app) previewEdit(name, args string) {
+	if name != "edit" && name != "write" {
+		return
 	}
-	fmt.Fprint(os.Stderr, "? [y/N] ")
+	var m struct {
+		OldString string `json:"old_string"`
+		NewString string `json:"new_string"`
+		Content   string `json:"content"`
+	}
+	if json.Unmarshal([]byte(args), &m) != nil {
+		return
+	}
+	switch name {
+	case "edit":
+		a.ui.Diff(m.OldString, m.NewString)
+	case "write":
+		a.ui.Diff("", m.Content)
+	}
+}
+
+func (a *app) approvePrompt(name, target string) bool {
+	label := name
+	if target != "" {
+		label += " (" + truncateArgs(target) + ")"
+	}
+	a.ui.Print(a.ui.Warn("allow " + label + "? [y/N] "))
 	r := bufio.NewReader(os.Stdin)
 	line, _ := r.ReadString('\n')
 	line = strings.ToLower(strings.TrimSpace(line))
