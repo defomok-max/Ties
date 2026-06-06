@@ -12,6 +12,10 @@ type Params struct {
 	WorkspaceRoot string
 	OS            string
 	SkillCatalog  string // "name: description" lines, may be empty
+	// ProjectContext is the concatenated body of discovered AGENTS.md /
+	// CLAUDE.md / TIES.md files. It carries repo-specific instructions and may
+	// be empty.
+	ProjectContext string
 }
 
 const base = `You are ties, an autonomous terminal coding agent. You help the user build,
@@ -35,6 +39,14 @@ func Build(p Params) string {
 	fmt.Fprintf(&b, "- Workspace root: %s\n", p.WorkspaceRoot)
 	if p.OS != "" {
 		fmt.Fprintf(&b, "- OS: %s\n", p.OS)
+	}
+	if strings.TrimSpace(p.ProjectContext) != "" {
+		b.WriteString("\n## Project context\n")
+		b.WriteString("The following instructions come from the project's AGENTS.md / ")
+		b.WriteString("CLAUDE.md / TIES.md files. Treat them as authoritative for this ")
+		b.WriteString("workspace; later files override earlier ones.\n\n")
+		b.WriteString(p.ProjectContext)
+		b.WriteString("\n")
 	}
 	if strings.TrimSpace(p.SkillCatalog) != "" {
 		b.WriteString("\n## Available skills\n")
