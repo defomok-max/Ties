@@ -41,8 +41,9 @@ internal/
     resilient   retry+backoff wrapper + ordered model-fallback chain
   agent       ReAct loop: provider ⊕ tools ⊕ permission ⊕ session
   tool        Tool interface + registry + built-ins (read/write/edit/
-              multiedit/patch/list/glob/grep/bash/webfetch/todo/task),
+              multiedit/patch/list/glob/grep/tree/bash/webfetch/todo/task),
               FS confined to root; `task` delegates to a sub-agent
+  memory      AGENTS.md / CLAUDE.md / TIES.md discovery + prompt injection
   pricing     best-effort USD cost from an embedded price table
   permission  allow/ask/deny engine, deny-wins, glob patterns
   session     append-only JSONL transcripts (create/resume/list/show)
@@ -115,8 +116,8 @@ execution → final answer):
   (HTTP(S) GET → readable text); `patch` (unified-diff applier with context
   matching, line drift, create/delete); `multiedit` (atomic multi-replace on one
   file); `todo` (in-run planning list rendered to the UI); **per-tool timeouts**
-  (`toolTimeout`, wraps each tool call in a deadline context).
-- Planned: structured `tree`.
+  (`toolTimeout`, wraps each tool call in a deadline context); structured
+  **`tree`** (depth-limited directory map, skips `.git`/`node_modules`).
 
 ### 4.5 MCP depth ⬜
 - HTTP/SSE transport in addition to stdio; resources & prompts (not just tools);
@@ -142,11 +143,25 @@ execution → final answer):
 - **TDD mode:** write test → run → implement → green loop.
 - **Voice in/out** and **pair-agents** remain planned.
 
-### 4.8 Quality & packaging ⬜
-- `--output json` for scripting; `--quiet`; non-interactive CI mode.
+### 4.8 Quality & packaging 🚧
+- ✅ `--output json` and `--quiet` for scripting / non-interactive CI: a quiet
+  run silences the UI and routes only the result to stdout; `--output json`
+  prints `{model, session, final, usage, costUSD}`. Unattended runs deny any
+  tool that would need an "ask" prompt unless `--yes` is set.
 - GitHub Actions: build matrix, `go test`, `golangci-lint`, release binaries
   (note: workflow files must be added manually — the bot lacks `workflows` perm).
 - `goreleaser` config, Homebrew tap, `go install` instructions.
+
+### 4.9 Project memory & references ✅
+- ✅ **Agent-context files:** `internal/memory` auto-discovers `AGENTS.md` /
+  `CLAUDE.md` / `TIES.md` (the convention shared by Claude Code, OpenCode and
+  Codex) by walking up from the working directory, plus an optional global file
+  under `~/.config/ties`. The concatenated text is injected into the system
+  prompt (nearest file wins); `/context` lists what loaded.
+- ✅ **`ties init`:** scaffolds a starter `AGENTS.md`, guessing build/test
+  commands from marker files (`go.mod`, `Cargo.toml`, `package.json`, …).
+- ✅ **`@file` references:** `@path` tokens in any `run`/`chat` prompt inline the
+  referenced file's contents (confined to the workspace root).
 
 ---
 
@@ -165,7 +180,11 @@ custom-provider system + cost/token metering and a **native Gemini provider**
 (§4.3), a full set of richer tools — `webfetch`, `patch`, `multiedit`, `todo`,
 output truncation and per-tool timeouts (§4.4), and an agentic-depth layer:
 per-run **token/$ budgets**, **sub-agents** (`task`), read-only **plan mode**
-and **session export** (§4.7).
+and **session export** (§4.7). Most recently, a **project-memory & references**
+layer (§4.9) brings Ties to parity with the reference CLIs: auto-loaded
+`AGENTS.md`/`CLAUDE.md`/`TIES.md` context, `ties init`, `@file` prompt
+references, a structured `tree` tool (§4.4) and scriptable `--quiet` /
+`--output json` runs (§4.8).
 
 **Gaps / risks to tackle next.** (1) The UI is still line-oriented, not a
 full-screen renderer — no scrollback management or syntax highlighting yet.
