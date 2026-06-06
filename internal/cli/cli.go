@@ -85,7 +85,7 @@ Commands:
   auth              Manage provider credentials (login/list/logout)
   config            Show the merged configuration and its sources
   mcp               Manage MCP servers (list/tools)
-  session           Inspect sessions (list/show)
+  session           Inspect sessions (list/show/export)
   skill             Inspect skills (list/show)
   tools             List the built-in tools
   models            List available providers and the default model
@@ -97,6 +97,7 @@ Common flags (run/chat):
   -y, --yes                      Auto-approve tool calls (no prompts)
       --resume <id>              Resume an existing session
       --no-session               Do not persist a session (run only)
+      --plan                     Read-only plan mode (no edits or shell)
       --max-steps <n>            Cap agent iterations
 
 Environment:
@@ -115,6 +116,7 @@ type app struct {
 	system  string
 	clients []*mcp.Client
 	ui      *ui.Printer
+	task    *taskTool
 }
 
 // setup loads config and assembles tools, skills, MCP servers and the prompt.
@@ -132,6 +134,10 @@ func setup(ctx context.Context, enableMCP bool) (*app, error) {
 	skillDirs := skill.DefaultDirs(root, cfg.SkillDirs)
 	skills := skill.Discover(skillDirs)
 	reg.Register(newSkillTool(skills))
+
+	// Sub-agent delegation tool; its spawn closure is wired per run in newAgent.
+	taskT := newTaskTool()
+	reg.Register(taskT)
 
 	var clients []*mcp.Client
 	if enableMCP {
@@ -191,6 +197,7 @@ func setup(ctx context.Context, enableMCP bool) (*app, error) {
 		system:  sys,
 		clients: clients,
 		ui:      pr,
+		task:    taskT,
 	}, nil
 }
 
