@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/defomok-max/Ties/internal/agent"
 	"github.com/defomok-max/Ties/internal/pricing"
 	"github.com/defomok-max/Ties/internal/provider"
+	"github.com/defomok-max/Ties/internal/screen"
 	"github.com/defomok-max/Ties/internal/session"
 	"github.com/defomok-max/Ties/internal/tool"
 	"github.com/defomok-max/Ties/internal/tui"
@@ -281,7 +283,14 @@ func cmdChat(args []string) error {
 
 	usage := &usageMeter{}
 
-	if flags.tui && isTerminal(os.Stdout) && isTerminal(os.Stdin) {
+	// Prefer the rich, mouse-aware, OpenCode-style screen whenever the terminal
+	// can drive it. Fall back to the line-oriented loop only if it can't start.
+	if isTerminal(os.Stdout) && isTerminal(os.Stdin) && screen.Supported(os.Stdin, os.Stdout) {
+		err := a.runChatScreen(ctx, flags, p, model, sess, usage)
+		if err == nil || !errors.Is(err, errFallbackChat) {
+			return err
+		}
+	} else if flags.tui && isTerminal(os.Stdout) && isTerminal(os.Stdin) {
 		return a.runTUIChat(ctx, flags, p, model, sess, usage)
 	}
 
@@ -544,6 +553,8 @@ func (a *app) newAgent(p provider.Provider, model string, sess *session.Session,
 		OnText: func(delta string) {
 			stopSpin()
 			switch {
+			case a.live != nil:
+				a.live.appendAssistant(delta)
 			case a.tui != nil:
 				a.tui.Update(func(m *tui.Model) {
 					m.SetWorking(false)
@@ -558,6 +569,13 @@ func (a *app) newAgent(p provider.Provider, model string, sess *session.Session,
 				a.lastAssistant.Reset()
 				a.lastAssistant.WriteString(text)
 			}
+			if a.live != nil {
+				if a.live.liveEmpty() && strings.TrimSpace(text) != "" {
+					a.live.appendAssistant(text)
+				}
+				a.live.endAssistant()
+				return
+			}
 			if a.tui != nil {
 				a.tui.Update(func(m *tui.Model) {
 					if m.LiveEmpty() && strings.TrimSpace(text) != "" {
@@ -569,6 +587,10 @@ func (a *app) newAgent(p provider.Provider, model string, sess *session.Session,
 		},
 		OnToolStart: func(name, args string) {
 			stopSpin()
+			if a.live != nil {
+				a.live.addTool(name, truncateArgs(args))
+				return
+			}
 			if a.tui != nil {
 				a.tui.Update(func(m *tui.Model) {
 					m.EndAssistant()
@@ -583,6 +605,10 @@ func (a *app) newAgent(p provider.Provider, model string, sess *session.Session,
 		},
 		OnToolResult: func(_ string, res tool.Result) {
 			if res.IsError {
+				if a.live != nil {
+					a.live.addError(firstLine(res.Content))
+					return
+				}
 				if a.tui != nil {
 					a.tui.Update(func(m *tui.Model) { m.AddError(firstLine(res.Content)) })
 					return
@@ -593,8 +619,12 @@ func (a *app) newAgent(p provider.Provider, model string, sess *session.Session,
 		OnUsage: func(u provider.Usage) {
 			usage.in += u.InputTokens
 			usage.out += u.OutputTokens
+			cost, ok := pricing.Estimate(model, usage.in, usage.out)
+			if a.live != nil {
+				a.live.setUsage(usage.in, usage.out, cost, ok)
+				return
+			}
 			if a.tui != nil {
-				cost, ok := pricing.Estimate(model, usage.in, usage.out)
 				a.tui.Update(func(m *tui.Model) { m.SetUsage(usage.in, usage.out, cost, ok) })
 			}
 		},
