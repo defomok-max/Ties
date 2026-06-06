@@ -37,9 +37,13 @@ internal/
   provider    vendor-neutral Provider interface + registry + SplitModel
     anthropic   Messages API client (SSE streaming, tool_use/tool_result)
     openai      Chat Completions client (SSE streaming, tool_calls)
+    gemini      native generateContent client (SSE, functionCall/Response)
+    resilient   retry+backoff wrapper + ordered model-fallback chain
   agent       ReAct loop: provider ⊕ tools ⊕ permission ⊕ session
   tool        Tool interface + registry + built-ins (read/write/edit/
-              list/glob/grep/bash), FS confined to root
+              multiedit/patch/list/glob/grep/bash/webfetch/todo),
+              FS confined to root
+  pricing     best-effort USD cost from an embedded price table
   permission  allow/ask/deny engine, deny-wins, glob patterns
   session     append-only JSONL transcripts (create/resume/list/show)
   mcp         Model Context Protocol client (stdio JSON-RPC), tool adapter
@@ -94,18 +98,24 @@ execution → final answer):
   model-fallback chain (`models: [...]`). Per-attempt + fallback callbacks
   surface in the UI.
 
-### 4.3 More providers ✅ (custom-provider system)
+### 4.3 More providers ✅ (custom providers + native Gemini)
 - Done: user-defined custom providers via config `type: openai|anthropic` +
   `baseUrl` + `apiKey` + custom `headers`, covering OpenRouter, Groq, Together,
   local Ollama (smart `/v1` handling, optional key), Azure-style gateways.
   `internal/pricing` gives best-effort cost from a built-in table.
-- Still planned: native Gemini + Bedrock wire formats; a fuller pricing/context
-  catalog.
+- Done: **native Gemini provider** (`internal/provider/gemini`) — the real
+  `generateContent` SSE wire format (`?alt=sse&key=`, out-of-band
+  `system_instruction`, `functionCall`/`functionResponse` mapping,
+  `usageMetadata`→usage, retryable `APIError`). Registered as `gemini/…`; Gemini
+  prices added to the pricing table.
+- Still planned: native Bedrock wire format; a fuller pricing/context catalog.
 
-### 4.4 Richer tools 🚧
-- Done: tool output-truncation budget (`maxToolOutput`).
-- Planned: `webfetch`, `patch` (unified-diff apply), `todo`, `multiedit`,
-  structured `tree`; per-tool timeouts.
+### 4.4 Richer tools ✅
+- Done: tool output-truncation budget (`maxToolOutput`); `webfetch`
+  (HTTP(S) GET → readable text); `patch` (unified-diff applier with context
+  matching, line drift, create/delete); `multiedit` (atomic multi-replace on one
+  file); `todo` (in-run planning list rendered to the UI).
+- Planned: structured `tree`; per-tool timeouts.
 
 ### 4.5 MCP depth ⬜
 - HTTP/SSE transport in addition to stdio; resources & prompts (not just tools);
@@ -118,7 +128,9 @@ execution → final answer):
 ### 4.7 Agent features (the "unique" layer) ⬜
 - **Sub-agents / pair-agents:** spawn a scoped agent for a subtask.
 - **Ralph loops:** bounded autonomous "keep going until done/criteria" mode.
-- **Budgets:** hard token/$ ceilings per run with graceful stop.
+- ✅ **Budgets:** hard token/$ ceilings per run with graceful stop —
+  `maxCostUSD` / `maxTokens` config; the agent accounts usage after each turn
+  and stops cleanly when a ceiling is reached (`agent.Budget`, `agent.Spent()`).
 - **TDD mode:** write test → run → implement → green loop.
 - **Voice in/out**, **session sharing/export** (markdown/html), **plan mode**
   (read-only proposal before edits).
@@ -140,10 +152,12 @@ permissions) is built in from the start, not bolted on. Sessions are plain JSONL
 — debuggable and replayable. MCP + skills are first-class, matching Claude
 Code's extensibility story.
 
-**Resolved since the first slice.** The four highest-leverage gaps are now
-shipped: a styled themed UI with spinner/diffs (§4.1), retries + model fallback
-(§4.2), a custom-provider system + cost/token metering (§4.3), and tool-output
-truncation (§4.4).
+**Resolved since the first slice.** The highest-leverage gaps are now shipped: a
+styled themed UI with spinner/diffs (§4.1), retries + model fallback (§4.2), a
+custom-provider system + cost/token metering and a **native Gemini provider**
+(§4.3), a full set of richer tools — `webfetch`, `patch`, `multiedit`, `todo`
+plus output truncation (§4.4), and per-run **token/$ budgets** with graceful
+stop (§4.7).
 
 **Gaps / risks to tackle next.** (1) The UI is still line-oriented, not a
 full-screen renderer — no scrollback management or syntax highlighting yet.
