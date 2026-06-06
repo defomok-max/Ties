@@ -8,14 +8,15 @@ tools, MCP servers and skills to get real work done from the terminal.
 Written in **Go 1.23 with only the standard library** — no vendor SDKs, no heavy
 frameworks. It compiles offline into a single static binary.
 
-> Early but real: the core agent loop, two providers, tools, permissions,
-> sessions, MCP and skills all work today. See [`plan.md`](./plan.md) for the
-> architecture and roadmap.
+> Early but real: the core agent loop, four providers, tools, permissions,
+> sessions, MCP (stdio + HTTP), skills, autonomous loops and TDD mode all work
+> today. See [`plan.md`](./plan.md) for the architecture and roadmap.
 
 ## Features
 
-- 🔌 **Multi-provider** — Anthropic, OpenAI and Google Gemini behind one
-  streaming interface; adding a vendor is one file. Pick with `provider/model`.
+- 🔌 **Multi-provider** — Anthropic, OpenAI, Google Gemini and AWS Bedrock
+  behind one streaming interface; adding a vendor is one file. Pick with
+  `provider/model`.
 - 🧬 **Custom providers** — point at any OpenAI- or Anthropic-compatible
   endpoint (OpenRouter, Groq, Together, local Ollama, gateways) with a `type`,
   `baseUrl`, `apiKey` and custom `headers`. No code required.
@@ -48,7 +49,10 @@ frameworks. It compiles offline into a single static binary.
   confined to the workspace root, with output-truncation budgets.
 - 🔐 **Permissions** — every tool call is gated by an allow / ask / deny engine
   (deny always wins), configurable per tool or per pattern.
-- 🧩 **MCP** — connect Model Context Protocol servers (stdio) and their tools
+- 🔁 **Autonomous loops & TDD** — `--loop`/`--until` keep the agent iterating
+  and self-verifying until the goal is done; `--tdd` enforces red→green→refactor.
+- 🧩 **MCP** — connect Model Context Protocol servers over **stdio or HTTP** and
+  their tools
   appear to the agent automatically.
 - 📚 **Skills** — drop `SKILL.md` files in `skills/`; the agent sees their
   descriptions and loads full bodies on demand.
@@ -90,18 +94,36 @@ ties run -m openai/gpt-4o "explain internal/agent/agent.go"
 | `ties init` | Scaffold an `AGENTS.md` project-context file |
 | `ties auth login/list/logout` | Manage provider credentials |
 | `ties config [path]` | Show merged config and its sources |
-| `ties mcp list/tools` | Inspect MCP servers and discovered tools |
+| `ties mcp list/add/remove/tools` | Manage MCP servers and inspect their tools |
 | `ties session list/show <id>` | Inspect transcripts |
 | `ties session export <id> [--format md\|html]` | Export a transcript to share |
-| `ties skill list/show <name>` | Inspect skills |
+| `ties skill list/show <name>/add <name>` | Inspect or scaffold skills |
 | `ties tools` | List built-in tools |
 | `ties models` | List providers and the default model |
 | `ties version` | Print version |
 
 Common flags for `run`/`chat`: `-m/--model`, `-y/--yes` (auto-approve tools),
 `--resume <id>`, `--no-session`, `--plan` (read-only plan mode),
-`--max-steps <n>`. `run` also takes `-q/--quiet` and `-o/--output text|json`
-for non-interactive scripting.
+`--tdd` (test-driven mode), `--max-steps <n>`. `run` also takes `-q/--quiet`
+and `-o/--output text|json` for non-interactive scripting, plus an autonomous
+loop: `--loop` (keep iterating until done), `--max-loops <n>` (default 12) and
+`--until <text>` (stop when the final message contains the text).
+
+### Autonomous loops & MCP scaffolding
+
+```bash
+# Keep going until the agent verifies the goal and prints TIES_TASK_COMPLETE
+ties run -y --loop "make `go test ./...` pass"
+ties run -y --until "all green" "fix the failing tests"
+
+# Test-driven: write a failing test first, then implement to green
+ties run -y --tdd "add a Reverse(string) helper with tests"
+
+# Register MCP servers without hand-editing JSON
+ties mcp add fs -- npx -y @modelcontextprotocol/server-filesystem .
+ties mcp add remote --url https://mcp.example.com/rpc --header "Authorization:Bearer <token>"
+ties skill add my-workflow      # scaffolds skills/my-workflow/SKILL.md
+```
 
 ### Project context & `@file` references
 
@@ -144,7 +166,8 @@ working directory → environment variables.
     "bash:rm *": "deny"
   },
   "mcp": {
-    "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "."] }
+    "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "."] },
+    "remote":     { "url": "https://mcp.example.com/rpc", "headers": { "Authorization": "Bearer <token>" } }
   },
   "skillDirs": ["./skills"]
 }
@@ -186,10 +209,28 @@ it under `providers` with a `type`:
 Then: `ties run -m groq/llama-3.3-70b-versatile "…"`. Run `ties models` to see
 all configured providers, their type and key status.
 
+### AWS Bedrock
+
+Bedrock's Anthropic Claude models work with no API key — they use standard AWS
+credentials. Set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (and
+`AWS_SESSION_TOKEN` if using temporary creds), plus a region via `AWS_REGION` or
+the provider's `baseUrl`:
+
+```jsonc
+{
+  "model": "bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0",
+  "providers": { "bedrock": { "baseUrl": "us-east-1" } }
+}
+```
+
+Requests are SigV4-signed and use the non-streaming `InvokeModel` API (the JSON
+response is adapted into the agent's streaming model).
+
 Environment overrides: `TIES_MODEL`, `TIES_MAX_STEPS`, `TIES_THEME`,
 `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` (or `GOOGLE_API_KEY`),
 `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `GEMINI_BASE_URL`, `NO_COLOR`,
-`FORCE_COLOR`.
+`FORCE_COLOR`. For Bedrock: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+`AWS_SESSION_TOKEN`, `AWS_REGION` (or `AWS_DEFAULT_REGION`).
 
 ### Chat slash-commands
 
