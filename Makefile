@@ -58,9 +58,14 @@ lint: ## Run gofmt, go vet and golangci-lint (if installed)
 tidy: ## Verify the module is tidy (no external deps expected)
 	go mod tidy
 
+.PHONY: release
+release: ## Cross-compile release binaries for all platforms into ./dist
+	VERSION=$(VERSION) sh scripts/build-release.sh
+
 .PHONY: clean
 clean: ## Remove build artifacts
 	rm -f $(BINARY) *.test *.out
+	rm -rf dist
 
 .PHONY: help
 help: ## Show this help
