@@ -102,6 +102,9 @@ type Factory func(cfg Options) (Provider, error)
 type Options struct {
 	APIKey  string
 	BaseURL string
+	// Headers are extra HTTP headers sent on every request, enabling custom
+	// OpenAI-/Anthropic-compatible endpoints (e.g. OpenRouter, Azure, gateways).
+	Headers map[string]string
 }
 
 var registry = map[string]Factory{}
