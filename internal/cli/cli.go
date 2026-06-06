@@ -22,6 +22,7 @@ import (
 	"github.com/defomok-max/Ties/internal/provider/resilient"
 	"github.com/defomok-max/Ties/internal/skill"
 	"github.com/defomok-max/Ties/internal/tool"
+	"github.com/defomok-max/Ties/internal/tui"
 	"github.com/defomok-max/Ties/internal/ui"
 	"github.com/defomok-max/Ties/internal/version"
 
@@ -135,6 +136,9 @@ type app struct {
 	ui      *ui.Printer
 	task    *taskTool
 	memory  []memory.Doc
+	// tui, when non-nil, is the active full-screen interface; agent callbacks
+	// route their output to it instead of the line-oriented printer.
+	tui *tui.Screen
 	// lastAssistant captures the final assistant text of a run for --output.
 	lastAssistant strings.Builder
 }
