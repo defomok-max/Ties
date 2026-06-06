@@ -41,9 +41,16 @@ type MCPServer struct {
 	// Env is extra environment for the server process (KEY=VALUE merged on top
 	// of the current environment).
 	Env map[string]string `json:"env,omitempty"`
+	// URL, when set, selects the Streamable HTTP transport instead of stdio.
+	URL string `json:"url,omitempty"`
+	// Headers are extra HTTP headers sent on every request (HTTP transport).
+	Headers map[string]string `json:"headers,omitempty"`
 	// Enabled toggles the server without removing its definition.
 	Enabled *bool `json:"enabled,omitempty"`
 }
+
+// IsHTTP reports whether the server uses the HTTP transport.
+func (s MCPServer) IsHTTP() bool { return s.URL != "" }
 
 // IsEnabled reports whether the server should be started. Missing == enabled.
 func (s MCPServer) IsEnabled() bool { return s.Enabled == nil || *s.Enabled }
