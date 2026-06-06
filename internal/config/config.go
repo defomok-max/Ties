@@ -67,6 +67,8 @@ type Config struct {
 	MaxCostUSD float64 `json:"maxCostUSD,omitempty"`
 	// MaxTokens optionally caps total tokens consumed by a single run (0 = off).
 	MaxTokens int `json:"maxTokens,omitempty"`
+	// ToolTimeout caps the seconds a single tool call may run (0 = no limit).
+	ToolTimeout int `json:"toolTimeout,omitempty"`
 	// Providers holds per-provider credentials keyed by provider name.
 	Providers map[string]ProviderConfig `json:"providers,omitempty"`
 	// Permission rules: map of "tool" or "tool:pattern" -> allow|ask|deny.
@@ -187,6 +189,9 @@ func (c *Config) merge(o *Config) {
 	if o.MaxTokens != 0 {
 		c.MaxTokens = o.MaxTokens
 	}
+	if o.ToolTimeout != 0 {
+		c.ToolTimeout = o.ToolTimeout
+	}
 	if len(o.Models) > 0 {
 		c.Models = o.Models
 	}
@@ -238,6 +243,11 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("TIES_MAX_STEPS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.MaxSteps = n
+		}
+	}
+	if v := os.Getenv("TIES_TOOL_TIMEOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.ToolTimeout = n
 		}
 	}
 	if v := os.Getenv("TIES_THEME"); v != "" {
