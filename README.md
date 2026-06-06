@@ -14,10 +14,19 @@ frameworks. It compiles offline into a single static binary.
 
 ## Features
 
-- 🔌 **Multi-provider** — Anthropic and OpenAI today behind one streaming
-  interface; adding a vendor is one file. Pick with `provider/model`.
+- 🔌 **Multi-provider** — Anthropic and OpenAI behind one streaming interface;
+  adding a vendor is one file. Pick with `provider/model`.
+- 🧬 **Custom providers** — point at any OpenAI- or Anthropic-compatible
+  endpoint (OpenRouter, Groq, Together, local Ollama, gateways) with a `type`,
+  `baseUrl`, `apiKey` and custom `headers`. No code required.
+- ♻️ **Resilient** — automatic retries with exponential backoff + jitter on
+  transient errors, plus an ordered **model-fallback chain**.
+- 💰 **Cost & token metering** — live token accounting and an estimated USD
+  cost from a built-in pricing table.
+- 🎨 **Beautiful, dependency-free TUI** — themes (`dark` / `light` / `mono`),
+  banner, spinner, colored tool lines and diffs, boxes; honors `NO_COLOR`.
 - 🛠️ **Built-in tools** — `read`, `write`, `edit`, `list`, `glob`, `grep`,
-  `bash`, all confined to the workspace root.
+  `bash`, all confined to the workspace root, with output-truncation budgets.
 - 🔐 **Permissions** — every tool call is gated by an allow / ask / deny engine
   (deny always wins), configurable per tool or per pattern.
 - 🧩 **MCP** — connect Model Context Protocol servers (stdio) and their tools
@@ -80,7 +89,12 @@ working directory → environment variables.
 ```jsonc
 {
   "model": "anthropic/claude-3-5-sonnet-latest",
+  // Optional fallback chain: if the primary errors, the next is tried.
+  "models": ["anthropic/claude-3-5-sonnet-latest", "openai/gpt-4o"],
   "maxSteps": 50,
+  "maxToolOutput": 16000,   // cap chars of a tool result fed back to the model
+  "retries": 2,             // auto-retries on 429 / 5xx (backoff + jitter)
+  "theme": "dark",          // dark | light | mono | auto
   "providers": {
     "anthropic": { "apiKey": "sk-...", "baseUrl": "https://api.anthropic.com" },
     "openai":    { "apiKey": "sk-..." }
@@ -97,8 +111,49 @@ working directory → environment variables.
 }
 ```
 
-Environment overrides: `TIES_MODEL`, `TIES_MAX_STEPS`, `ANTHROPIC_API_KEY`,
-`OPENAI_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`.
+### Custom providers
+
+Any OpenAI- or Anthropic-compatible endpoint works without code — just declare
+it under `providers` with a `type`:
+
+```jsonc
+{
+  "model": "groq/llama-3.3-70b-versatile",
+  "providers": {
+    // OpenRouter, Groq, Together, Fireworks, … (OpenAI Chat Completions)
+    "groq": {
+      "type": "openai",
+      "baseUrl": "https://api.groq.com/openai",
+      "apiKey": "gsk_...",
+      "label": "Groq",
+      "models": ["llama-3.3-70b-versatile"]
+    },
+    // Local Ollama (no key needed; baseUrl ending in /v1 is handled)
+    "ollama": {
+      "type": "openai",
+      "baseUrl": "http://localhost:11434/v1",
+      "models": ["qwen2.5-coder"]
+    },
+    // Anything needing extra auth headers (e.g. Azure, gateways)
+    "gateway": {
+      "type": "anthropic",
+      "baseUrl": "https://my-gateway.example.com",
+      "headers": { "X-My-Auth": "token" }
+    }
+  }
+}
+```
+
+Then: `ties run -m groq/llama-3.3-70b-versatile "…"`. Run `ties models` to see
+all configured providers, their type and key status.
+
+Environment overrides: `TIES_MODEL`, `TIES_MAX_STEPS`, `TIES_THEME`,
+`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`,
+`NO_COLOR`, `FORCE_COLOR`.
+
+### Chat slash-commands
+
+`/help` · `/tools` · `/skills` · `/model` · `/usage` · `/clear` · `/exit`
 
 ## Development
 
