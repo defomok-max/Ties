@@ -26,6 +26,7 @@ import (
 
 	// Register providers via their init() side effects.
 	_ "github.com/defomok-max/Ties/internal/provider/anthropic"
+	_ "github.com/defomok-max/Ties/internal/provider/gemini"
 	_ "github.com/defomok-max/Ties/internal/provider/openai"
 )
 
@@ -162,6 +163,24 @@ func setup(ctx context.Context, enableMCP bool) (*app, error) {
 	})
 
 	pr := ui.New(os.Stderr, cfg.Theme, ui.ColorEnabled(os.Stderr))
+
+	// The planning todo tool renders its list to the UI on every update.
+	reg.Register(tool.NewTodoTool(func(items []tool.TodoItem) {
+		if len(items) == 0 {
+			return
+		}
+		pr.Println(pr.Accent("· plan"))
+		for _, it := range items {
+			mark, paint := "○", pr.Dim
+			switch it.Status {
+			case "done":
+				mark, paint = "✓", pr.Success
+			case "in_progress":
+				mark, paint = "▸", pr.Accent
+			}
+			pr.Println("  " + paint(mark+" "+it.Text))
+		}
+	}))
 
 	return &app{
 		cfg:     cfg,
