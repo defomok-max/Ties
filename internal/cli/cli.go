@@ -36,12 +36,24 @@ import (
 // Execute is the entry point invoked by main. It returns a process exit code.
 func Execute(args []string) int {
 	if len(args) == 0 {
+		// Bare `ties` on a terminal opens the friendly menu (and keeps the
+		// window open — handy when launched by double-click on Windows). When
+		// output is piped/redirected, fall back to printing usage.
+		if interactiveTTY() {
+			if err := runHome(); err != nil {
+				fmt.Fprintln(os.Stderr, "ties: "+err.Error())
+				return 1
+			}
+			return 0
+		}
 		usage()
 		return 1
 	}
 	cmd, rest := args[0], args[1:]
 	var err error
 	switch cmd {
+	case "menu", "home", "start":
+		err = cmdMenu(rest)
 	case "run":
 		err = cmdRun(rest)
 	case "chat":
@@ -82,9 +94,11 @@ func usage() {
 	fmt.Print(`ties — a terminal AI coding agent (Claude Code / OpenCode / Codex style)
 
 Usage:
+  ties                Open the interactive menu (setup wizard + chat launcher)
   ties <command> [flags]
 
 Commands:
+  menu              Open the interactive home menu (default when run with no args)
   run [prompt]      Run a single agent task (reads stdin if no prompt)
   chat              Start an interactive chat session
   init              Scaffold an AGENTS.md project-context file
