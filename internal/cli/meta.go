@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -175,9 +176,17 @@ func cmdMCP(args []string) error {
 			if !srv.IsEnabled() {
 				status = "disabled"
 			}
-			fmt.Printf("%-16s %s  [%s]\n", name, srv.Command+" "+strings.Join(srv.Args, " "), status)
+			target := strings.TrimSpace(srv.Command + " " + strings.Join(srv.Args, " "))
+			if srv.IsHTTP() {
+				target = "http " + srv.URL
+			}
+			fmt.Printf("%-16s %s  [%s]\n", name, target, status)
 		}
 		return nil
+	case "add":
+		return mcpAdd(args[1:])
+	case "remove", "rm":
+		return mcpRemove(args[1:])
 	case "tools":
 		ctx := context.Background()
 		a, err := setup(ctx, true)
@@ -192,6 +201,95 @@ func cmdMCP(args []string) error {
 	default:
 		return fmt.Errorf("unknown mcp subcommand %q", args[0])
 	}
+}
+
+// mcpAdd registers an MCP server in the global config. Two forms:
+//
+//	ties mcp add <name> --url <url> [--header K:V ...]      (HTTP transport)
+//	ties mcp add <name> [--header K:V ...] -- <command> [args...]   (stdio)
+func mcpAdd(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: ties mcp add <name> (--url <url> | -- <command> [args...]) [--header K:V]")
+	}
+	name := args[0]
+	rest := args[1:]
+	srv := config.MCPServer{}
+	headers := map[string]string{}
+	for i := 0; i < len(rest); i++ {
+		switch rest[i] {
+		case "--url":
+			if i+1 >= len(rest) {
+				return fmt.Errorf("--url needs a value")
+			}
+			srv.URL = rest[i+1]
+			i++
+		case "--header", "-H":
+			if i+1 >= len(rest) {
+				return fmt.Errorf("--header needs K:V")
+			}
+			k, v, ok := strings.Cut(rest[i+1], ":")
+			if !ok {
+				return fmt.Errorf("--header must be in K:V form")
+			}
+			headers[strings.TrimSpace(k)] = strings.TrimSpace(v)
+			i++
+		case "--":
+			if i+1 < len(rest) {
+				srv.Command = rest[i+1]
+				srv.Args = append([]string{}, rest[i+2:]...)
+			}
+			i = len(rest)
+		default:
+			// First bare token without "--" is treated as the command.
+			if srv.Command == "" && srv.URL == "" {
+				srv.Command = rest[i]
+				srv.Args = append([]string{}, rest[i+1:]...)
+				i = len(rest)
+			}
+		}
+	}
+	if srv.URL == "" && srv.Command == "" {
+		return fmt.Errorf("provide --url <url> or -- <command> [args...]")
+	}
+	if len(headers) > 0 {
+		srv.Headers = headers
+	}
+	cfg, err := loadGlobal()
+	if err != nil {
+		return err
+	}
+	if cfg.MCP == nil {
+		cfg.MCP = map[string]config.MCPServer{}
+	}
+	cfg.MCP[name] = srv
+	if err := config.Save(config.GlobalPath(), cfg); err != nil {
+		return err
+	}
+	if srv.IsHTTP() {
+		fmt.Printf("Added MCP server %q (http %s) to %s\n", name, srv.URL, config.GlobalPath())
+	} else {
+		fmt.Printf("Added MCP server %q (%s) to %s\n", name, strings.TrimSpace(srv.Command+" "+strings.Join(srv.Args, " ")), config.GlobalPath())
+	}
+	return nil
+}
+
+func mcpRemove(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: ties mcp remove <name>")
+	}
+	cfg, err := loadGlobal()
+	if err != nil {
+		return err
+	}
+	if _, ok := cfg.MCP[args[0]]; !ok {
+		return fmt.Errorf("no MCP server named %q", args[0])
+	}
+	delete(cfg.MCP, args[0])
+	if err := config.Save(config.GlobalPath(), cfg); err != nil {
+		return err
+	}
+	fmt.Printf("Removed MCP server %q\n", args[0])
+	return nil
 }
 
 // ---- session ----
@@ -272,6 +370,9 @@ func cmdSession(args []string) error {
 // ---- skill ----
 
 func cmdSkill(args []string) error {
+	if len(args) > 0 && args[0] == "add" {
+		return skillAdd(args[1:])
+	}
 	ctx := context.Background()
 	a, err := setup(ctx, false)
 	if err != nil {
@@ -305,6 +406,72 @@ func cmdSkill(args []string) error {
 	default:
 		return fmt.Errorf("unknown skill subcommand %q", args[0])
 	}
+}
+
+// skillAdd scaffolds skills/<name>/SKILL.md with valid frontmatter under the
+// working directory so the agent discovers it on the next run.
+func skillAdd(args []string) error {
+	force := false
+	var name string
+	for _, a := range args {
+		switch a {
+		case "--force", "-f":
+			force = true
+		default:
+			if name == "" {
+				name = a
+			}
+		}
+	}
+	if name == "" {
+		return fmt.Errorf("usage: ties skill add <name> [--force]")
+	}
+	if !skillNameOK(name) {
+		return fmt.Errorf("skill name must be lowercase letters, digits, '-' or '_'")
+	}
+	root, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(root, "skills", name)
+	path := filepath.Join(dir, "SKILL.md")
+	if _, err := os.Stat(path); err == nil && !force {
+		return fmt.Errorf("%s already exists (use --force to overwrite)", path)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	body := "---\n" +
+		"name: " + name + "\n" +
+		"description: One-line summary of when the agent should load this skill.\n" +
+		"---\n\n" +
+		"# " + name + "\n\n" +
+		"## When to use\n\n" +
+		"_Describe the situations where this knowledge applies._\n\n" +
+		"## Steps\n\n" +
+		"1. _First step._\n2. _Second step._\n\n" +
+		"## Notes\n\n" +
+		"- _Gotchas, references, and best practices._\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("Created %s\n", path)
+	fmt.Println("Edit the description and body, then it will be discovered automatically.")
+	return nil
+}
+
+func skillNameOK(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // ---- tools ----
