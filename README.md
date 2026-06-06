@@ -34,11 +34,18 @@ frameworks. It compiles offline into a single static binary.
   may run, so a hung command can't stall the whole session.
 - 📤 **Session export** — `ties session export <id> --format md|html` turns a
   transcript into a shareable Markdown or standalone HTML page.
+- 🧠 **Project memory** — auto-loads `AGENTS.md` / `CLAUDE.md` / `TIES.md` (the
+  same files Claude Code, OpenCode and Codex use) from the repo and a global
+  config dir into the system prompt. Scaffold one with `ties init`.
+- 📎 **`@file` references** — mention `@path/to/file` in any prompt and its
+  contents are inlined for the agent automatically.
+- 🤖 **Scriptable runs** — `--quiet` silences the UI and `--output json` prints
+  a machine-readable result (final text, session id, usage, cost) for CI/pipes.
 - 🎨 **Beautiful, dependency-free TUI** — themes (`dark` / `light` / `mono`),
   banner, spinner, colored tool lines and diffs, boxes; honors `NO_COLOR`.
 - 🛠️ **Built-in tools** — `read`, `write`, `edit`, `multiedit`, `patch`,
-  `list`, `glob`, `grep`, `bash`, `webfetch` and a `todo` planner, all confined
-  to the workspace root, with output-truncation budgets.
+  `list`, `glob`, `grep`, `tree`, `bash`, `webfetch` and a `todo` planner, all
+  confined to the workspace root, with output-truncation budgets.
 - 🔐 **Permissions** — every tool call is gated by an allow / ask / deny engine
   (deny always wins), configurable per tool or per pattern.
 - 🧩 **MCP** — connect Model Context Protocol servers (stdio) and their tools
@@ -80,6 +87,7 @@ ties run -m openai/gpt-4o "explain internal/agent/agent.go"
 | --- | --- |
 | `ties run [prompt]` | Run a single agent task (reads stdin if no prompt) |
 | `ties chat` | Interactive chat session |
+| `ties init` | Scaffold an `AGENTS.md` project-context file |
 | `ties auth login/list/logout` | Manage provider credentials |
 | `ties config [path]` | Show merged config and its sources |
 | `ties mcp list/tools` | Inspect MCP servers and discovered tools |
@@ -92,7 +100,20 @@ ties run -m openai/gpt-4o "explain internal/agent/agent.go"
 
 Common flags for `run`/`chat`: `-m/--model`, `-y/--yes` (auto-approve tools),
 `--resume <id>`, `--no-session`, `--plan` (read-only plan mode),
-`--max-steps <n>`.
+`--max-steps <n>`. `run` also takes `-q/--quiet` and `-o/--output text|json`
+for non-interactive scripting.
+
+### Project context & `@file` references
+
+Drop an `AGENTS.md` (or `CLAUDE.md` / `TIES.md`) in your repo — `ties init`
+scaffolds one — and its contents are injected into every run's system prompt,
+nearest file winning. In a prompt, `@path/to/file` inlines that file:
+
+```bash
+ties run "explain the bug in @internal/agent/agent.go"
+echo "summarize @README.md" | ties run -y --quiet
+ties run -y --output json "what does this repo do?" | jq .final
+```
 
 ## Configuration
 
@@ -172,7 +193,7 @@ Environment overrides: `TIES_MODEL`, `TIES_MAX_STEPS`, `TIES_THEME`,
 
 ### Chat slash-commands
 
-`/help` · `/tools` · `/skills` · `/model` · `/usage` · `/clear` · `/exit`
+`/help` · `/tools` · `/skills` · `/context` · `/model` · `/usage` · `/clear` · `/exit`
 
 ## Development
 
