@@ -11,14 +11,17 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/defomok-max/Ties/internal/config"
 	"github.com/defomok-max/Ties/internal/mcp"
 	"github.com/defomok-max/Ties/internal/permission"
 	"github.com/defomok-max/Ties/internal/prompt"
 	"github.com/defomok-max/Ties/internal/provider"
+	"github.com/defomok-max/Ties/internal/provider/resilient"
 	"github.com/defomok-max/Ties/internal/skill"
 	"github.com/defomok-max/Ties/internal/tool"
+	"github.com/defomok-max/Ties/internal/ui"
 	"github.com/defomok-max/Ties/internal/version"
 
 	// Register providers via their init() side effects.
@@ -110,6 +113,7 @@ type app struct {
 	perm    *permission.Engine
 	system  string
 	clients []*mcp.Client
+	ui      *ui.Printer
 }
 
 // setup loads config and assembles tools, skills, MCP servers and the prompt.
@@ -157,6 +161,8 @@ func setup(ctx context.Context, enableMCP bool) (*app, error) {
 		SkillCatalog:  skill.Catalog(skills),
 	})
 
+	pr := ui.New(os.Stderr, cfg.Theme, ui.ColorEnabled(os.Stderr))
+
 	return &app{
 		cfg:     cfg,
 		root:    root,
@@ -165,6 +171,7 @@ func setup(ctx context.Context, enableMCP bool) (*app, error) {
 		perm:    permission.New(cfg.Permission),
 		system:  sys,
 		clients: clients,
+		ui:      pr,
 	}, nil
 }
 
@@ -174,25 +181,84 @@ func (a *app) close() {
 	}
 }
 
-// buildProvider resolves the model string into a provider instance.
-func (a *app) buildProvider(modelOverride string) (provider.Provider, string, error) {
-	model := a.cfg.Model
-	if modelOverride != "" {
-		model = modelOverride
-	}
+// makeProvider resolves a single "provider/model" string into a provider
+// instance (wrapped with retries) and the bare model id. It supports custom
+// providers declared in config via a "type" of openai|anthropic.
+func (a *app) makeProvider(model string) (provider.Provider, string, error) {
 	name, bare := provider.SplitModel(model)
 	if name == "" {
 		return nil, "", fmt.Errorf("model %q must be in provider/model form", model)
 	}
 	pc := a.cfg.Providers[name]
-	p, err := provider.New(name, provider.Options{APIKey: pc.APIKey, BaseURL: pc.BaseURL})
+	kind := name
+	if pc.Type != "" { // custom provider speaking a known protocol
+		kind = pc.Type
+	}
+	p, err := provider.New(kind, provider.Options{APIKey: pc.APIKey, BaseURL: pc.BaseURL, Headers: pc.Headers})
 	if err != nil {
 		return nil, "", err
 	}
-	if pc.APIKey == "" {
+	// A built-in endpoint with no key and no custom base cannot authenticate.
+	if pc.APIKey == "" && pc.BaseURL == "" {
 		return nil, "", fmt.Errorf("no API key for provider %q — run `ties auth login %s` or set the env var", name, name)
 	}
+	p = resilient.Retrying(p, resilient.RetryOptions{
+		MaxRetries: a.cfg.Retries,
+		Base:       500 * time.Millisecond,
+		OnRetry: func(attempt int, err error, wait time.Duration) {
+			a.ui.Println(a.ui.Warn(fmt.Sprintf("· retry %d after %s (%s)", attempt, wait.Round(time.Millisecond), shortErr(err))))
+		},
+	})
 	return p, bare, nil
+}
+
+// buildProvider resolves the model (plus any configured fallback chain) into a
+// single provider. modelOverride, when set, bypasses the fallback chain.
+func (a *app) buildProvider(modelOverride string) (provider.Provider, string, error) {
+	models := []string{a.cfg.Model}
+	if modelOverride != "" {
+		models = []string{modelOverride}
+	} else if len(a.cfg.Models) > 0 {
+		models = append([]string{}, a.cfg.Models...)
+	}
+
+	var entries []resilient.Entry
+	var firstBare string
+	for i, m := range models {
+		p, bare, err := a.makeProvider(m)
+		if err != nil {
+			// If the primary builds but a later fallback can't, skip it; if the
+			// very first fails, surface the error.
+			if i == 0 {
+				return nil, "", err
+			}
+			continue
+		}
+		if firstBare == "" {
+			firstBare = bare
+		}
+		entries = append(entries, resilient.Entry{Provider: p, Model: bare})
+	}
+	if len(entries) == 0 {
+		return nil, "", fmt.Errorf("no usable model could be constructed")
+	}
+	p := resilient.Chain(entries, resilient.ChainOptions{
+		OnFallback: func(from, to string, err error) {
+			a.ui.Println(a.ui.Warn(fmt.Sprintf("· model %s failed (%s) — falling back to %s", from, shortErr(err), to)))
+		},
+	})
+	return p, firstBare, nil
+}
+
+func shortErr(err error) string {
+	s := err.Error()
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	if len(s) > 80 {
+		s = s[:80] + "…"
+	}
+	return s
 }
 
 func (a *app) sessionDir() string { return filepath.Join(a.root, ".ties", "sessions") }
