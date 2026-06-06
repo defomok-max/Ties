@@ -293,6 +293,8 @@ func (a *app) newAgent(p provider.Provider, model string, sess *session.Session,
 		Session:       sess,
 		MaxSteps:      maxSteps,
 		MaxToolOutput: a.cfg.MaxToolOutput,
+		Budget:        agent.Budget{MaxUSD: a.cfg.MaxCostUSD, MaxTokens: a.cfg.MaxTokens},
+		EstimateCost:  pricing.Estimate,
 		OnText: func(delta string) {
 			stopSpin()
 			fmt.Print(delta)
@@ -327,16 +329,16 @@ func (a *app) previewEdit(name, args string) {
 		return
 	}
 	var m struct {
-		OldString string `json:"old_string"`
-		NewString string `json:"new_string"`
-		Content   string `json:"content"`
+		Old     string `json:"old"`
+		New     string `json:"new"`
+		Content string `json:"content"`
 	}
 	if json.Unmarshal([]byte(args), &m) != nil {
 		return
 	}
 	switch name {
 	case "edit":
-		a.ui.Diff(m.OldString, m.NewString)
+		a.ui.Diff(m.Old, m.New)
 	case "write":
 		a.ui.Diff("", m.Content)
 	}
