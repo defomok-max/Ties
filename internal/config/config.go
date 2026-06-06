@@ -14,10 +14,21 @@ import (
 )
 
 // ProviderConfig holds credentials and endpoint overrides for a single
-// model provider (e.g. "anthropic", "openai").
+// model provider. The provider may be a built-in ("anthropic", "openai") or a
+// user-defined custom provider that speaks a compatible protocol.
 type ProviderConfig struct {
 	APIKey  string `json:"apiKey,omitempty"`
 	BaseURL string `json:"baseUrl,omitempty"`
+	// Type selects which wire protocol to use for a CUSTOM provider:
+	// "openai" (Chat Completions) or "anthropic" (Messages). Empty means the
+	// provider key is itself a built-in name.
+	Type string `json:"type,omitempty"`
+	// Label is an optional human-friendly name shown by `ties models`.
+	Label string `json:"label,omitempty"`
+	// Models lists known model ids for this provider (display + discovery).
+	Models []string `json:"models,omitempty"`
+	// Headers are extra HTTP headers sent on every request to this provider.
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // MCPServer describes an external Model Context Protocol server that ties
@@ -42,8 +53,16 @@ type Config struct {
 	// Model is the default model in "provider/model" form, e.g.
 	// "anthropic/claude-3-5-sonnet-latest".
 	Model string `json:"model,omitempty"`
+	// Models is an optional ordered fallback chain in "provider/model" form.
+	// If the primary model errors, the next is tried.
+	Models []string `json:"models,omitempty"`
 	// MaxSteps caps the agent reasoning/acting iterations per run.
 	MaxSteps int `json:"maxSteps,omitempty"`
+	// MaxToolOutput caps the characters of a tool result fed back to the model
+	// (0 = a sensible default). Prevents one huge file from blowing context.
+	MaxToolOutput int `json:"maxToolOutput,omitempty"`
+	// Retries is the number of automatic retries on transient provider errors.
+	Retries int `json:"retries,omitempty"`
 	// Providers holds per-provider credentials keyed by provider name.
 	Providers map[string]ProviderConfig `json:"providers,omitempty"`
 	// Permission rules: map of "tool" or "tool:pattern" -> allow|ask|deny.
@@ -65,12 +84,14 @@ func (c *Config) Sources() []string { return c.sources }
 // Default returns the built-in default configuration.
 func Default() *Config {
 	return &Config{
-		Model:      "anthropic/claude-3-5-sonnet-latest",
-		MaxSteps:   50,
-		Providers:  map[string]ProviderConfig{},
-		Permission: map[string]string{"*": "ask", "read": "allow", "list": "allow", "glob": "allow", "grep": "allow"},
-		MCP:        map[string]MCPServer{},
-		Theme:      "auto",
+		Model:         "anthropic/claude-3-5-sonnet-latest",
+		MaxSteps:      50,
+		MaxToolOutput: 16000,
+		Retries:       2,
+		Providers:     map[string]ProviderConfig{},
+		Permission:    map[string]string{"*": "ask", "read": "allow", "list": "allow", "glob": "allow", "grep": "allow"},
+		MCP:           map[string]MCPServer{},
+		Theme:         "auto",
 	}
 }
 
@@ -150,6 +171,15 @@ func (c *Config) merge(o *Config) {
 	if o.MaxSteps != 0 {
 		c.MaxSteps = o.MaxSteps
 	}
+	if o.MaxToolOutput != 0 {
+		c.MaxToolOutput = o.MaxToolOutput
+	}
+	if o.Retries != 0 {
+		c.Retries = o.Retries
+	}
+	if len(o.Models) > 0 {
+		c.Models = o.Models
+	}
 	if o.Theme != "" {
 		c.Theme = o.Theme
 	}
@@ -160,6 +190,23 @@ func (c *Config) merge(o *Config) {
 		}
 		if v.BaseURL != "" {
 			cur.BaseURL = v.BaseURL
+		}
+		if v.Type != "" {
+			cur.Type = v.Type
+		}
+		if v.Label != "" {
+			cur.Label = v.Label
+		}
+		if len(v.Models) > 0 {
+			cur.Models = v.Models
+		}
+		if len(v.Headers) > 0 {
+			if cur.Headers == nil {
+				cur.Headers = map[string]string{}
+			}
+			for hk, hv := range v.Headers {
+				cur.Headers[hk] = hv
+			}
 		}
 		c.Providers[k] = cur
 	}
@@ -182,6 +229,9 @@ func applyEnv(cfg *Config) {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.MaxSteps = n
 		}
+	}
+	if v := os.Getenv("TIES_THEME"); v != "" {
+		cfg.Theme = v
 	}
 	// Provider keys via well-known env vars.
 	setProviderKey(cfg, "anthropic", firstEnv("TIES_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"))
