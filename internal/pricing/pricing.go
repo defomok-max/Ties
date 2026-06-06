@@ -30,6 +30,12 @@ var table = map[string]Price{
 	"o3-mini":      {Input: 1.10, Output: 4.40},
 	"o1-mini":      {Input: 1.10, Output: 4.40},
 	"o1":           {Input: 15.00, Output: 60.00},
+	// Google Gemini
+	"gemini-1.5-flash": {Input: 0.075, Output: 0.30},
+	"gemini-1.5-pro":   {Input: 1.25, Output: 5.00},
+	"gemini-2.0-flash": {Input: 0.10, Output: 0.40},
+	"gemini-2.5-flash": {Input: 0.30, Output: 2.50},
+	"gemini-2.5-pro":   {Input: 1.25, Output: 10.00},
 	// Common open models served by compatible providers (often free/local)
 	"llama":   {Input: 0.00, Output: 0.00},
 	"qwen":    {Input: 0.00, Output: 0.00},
