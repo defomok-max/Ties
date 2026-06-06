@@ -14,8 +14,8 @@ frameworks. It compiles offline into a single static binary.
 
 ## Features
 
-- 🔌 **Multi-provider** — Anthropic and OpenAI behind one streaming interface;
-  adding a vendor is one file. Pick with `provider/model`.
+- 🔌 **Multi-provider** — Anthropic, OpenAI and Google Gemini behind one
+  streaming interface; adding a vendor is one file. Pick with `provider/model`.
 - 🧬 **Custom providers** — point at any OpenAI- or Anthropic-compatible
   endpoint (OpenRouter, Groq, Together, local Ollama, gateways) with a `type`,
   `baseUrl`, `apiKey` and custom `headers`. No code required.
@@ -23,10 +23,13 @@ frameworks. It compiles offline into a single static binary.
   transient errors, plus an ordered **model-fallback chain**.
 - 💰 **Cost & token metering** — live token accounting and an estimated USD
   cost from a built-in pricing table.
+- 🛑 **Run budgets** — optional `maxCostUSD` / `maxTokens` ceilings stop a
+  runaway agent before it burns through your wallet or context.
 - 🎨 **Beautiful, dependency-free TUI** — themes (`dark` / `light` / `mono`),
   banner, spinner, colored tool lines and diffs, boxes; honors `NO_COLOR`.
-- 🛠️ **Built-in tools** — `read`, `write`, `edit`, `list`, `glob`, `grep`,
-  `bash`, all confined to the workspace root, with output-truncation budgets.
+- 🛠️ **Built-in tools** — `read`, `write`, `edit`, `multiedit`, `patch`,
+  `list`, `glob`, `grep`, `bash`, `webfetch` and a `todo` planner, all confined
+  to the workspace root, with output-truncation budgets.
 - 🔐 **Permissions** — every tool call is gated by an allow / ask / deny engine
   (deny always wins), configurable per tool or per pattern.
 - 🧩 **MCP** — connect Model Context Protocol servers (stdio) and their tools
@@ -50,7 +53,7 @@ go build -o ties ./cmd/ties
 ```bash
 # 1. Add a provider key (stored in ~/.config/ties/ties.json) or use an env var
 ties auth login anthropic           # prompts for the key
-export ANTHROPIC_API_KEY=sk-...     # or just set the env var
+export ANTHROPIC_API_KEY=sk-...     # or OPENAI_API_KEY / GEMINI_API_KEY
 
 # 2. One-shot task
 ties run "add a --version flag and update the README"
@@ -94,10 +97,13 @@ working directory → environment variables.
   "maxSteps": 50,
   "maxToolOutput": 16000,   // cap chars of a tool result fed back to the model
   "retries": 2,             // auto-retries on 429 / 5xx (backoff + jitter)
+  "maxCostUSD": 0,          // 0 = off; stop the run past this estimated spend
+  "maxTokens": 0,           // 0 = off; stop the run past this many tokens
   "theme": "dark",          // dark | light | mono | auto
   "providers": {
     "anthropic": { "apiKey": "sk-...", "baseUrl": "https://api.anthropic.com" },
-    "openai":    { "apiKey": "sk-..." }
+    "openai":    { "apiKey": "sk-..." },
+    "gemini":    { "apiKey": "..." }
   },
   "permission": {
     "*": "ask",
@@ -148,8 +154,9 @@ Then: `ties run -m groq/llama-3.3-70b-versatile "…"`. Run `ties models` to see
 all configured providers, their type and key status.
 
 Environment overrides: `TIES_MODEL`, `TIES_MAX_STEPS`, `TIES_THEME`,
-`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`,
-`NO_COLOR`, `FORCE_COLOR`.
+`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` (or `GOOGLE_API_KEY`),
+`ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `GEMINI_BASE_URL`, `NO_COLOR`,
+`FORCE_COLOR`.
 
 ### Chat slash-commands
 
