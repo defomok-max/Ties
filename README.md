@@ -44,6 +44,9 @@ frameworks. It compiles offline into a single static binary.
   a machine-readable result (final text, session id, usage, cost) for CI/pipes.
 - 🎨 **Beautiful, dependency-free TUI** — themes (`dark` / `light` / `mono`),
   banner, spinner, colored tool lines and diffs, boxes; honors `NO_COLOR`.
+  `ties chat --tui` opens a **full-screen interface**: a fixed header, a
+  scrolling transcript with syntax-highlighted code blocks, and a live status
+  bar (token/cost metering + spinner) — all in pure stdlib.
 - 🛠️ **Built-in tools** — `read`, `write`, `edit`, `multiedit`, `patch`,
   `list`, `glob`, `grep`, `tree`, `bash`, `webfetch` and a `todo` planner, all
   confined to the workspace root, with output-truncation budgets.
@@ -104,7 +107,9 @@ ties run -m openai/gpt-4o "explain internal/agent/agent.go"
 
 Common flags for `run`/`chat`: `-m/--model`, `-y/--yes` (auto-approve tools),
 `--resume <id>`, `--no-session`, `--plan` (read-only plan mode),
-`--tdd` (test-driven mode), `--max-steps <n>`. `run` also takes `-q/--quiet`
+`--tdd` (test-driven mode), `--max-steps <n>`. `chat` also takes `--tui` for
+the full-screen interface (falls back to the line UI when stdout is not a TTY).
+`run` also takes `-q/--quiet`
 and `-o/--output text|json` for non-interactive scripting, plus an autonomous
 loop: `--loop` (keep iterating until done), `--max-loops <n>` (default 12) and
 `--until <text>` (stop when the final message contains the text).
@@ -223,14 +228,17 @@ the provider's `baseUrl`:
 }
 ```
 
-Requests are SigV4-signed and use the non-streaming `InvokeModel` API (the JSON
-response is adapted into the agent's streaming model).
+Requests are SigV4-signed. By default Ties uses Bedrock's
+`InvokeModelWithResponseStream` API and decodes the binary
+`vnd.amazon.eventstream` framing for **true token-by-token streaming**; set
+`TIES_BEDROCK_NO_STREAM=1` to fall back to the buffered `InvokeModel` API.
 
 Environment overrides: `TIES_MODEL`, `TIES_MAX_STEPS`, `TIES_THEME`,
 `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` (or `GOOGLE_API_KEY`),
 `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `GEMINI_BASE_URL`, `NO_COLOR`,
 `FORCE_COLOR`. For Bedrock: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
-`AWS_SESSION_TOKEN`, `AWS_REGION` (or `AWS_DEFAULT_REGION`).
+`AWS_SESSION_TOKEN`, `AWS_REGION` (or `AWS_DEFAULT_REGION`),
+`TIES_BEDROCK_NO_STREAM`.
 
 ### Chat slash-commands
 
