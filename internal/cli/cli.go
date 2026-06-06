@@ -15,6 +15,7 @@ import (
 
 	"github.com/defomok-max/Ties/internal/config"
 	"github.com/defomok-max/Ties/internal/mcp"
+	"github.com/defomok-max/Ties/internal/memory"
 	"github.com/defomok-max/Ties/internal/permission"
 	"github.com/defomok-max/Ties/internal/prompt"
 	"github.com/defomok-max/Ties/internal/provider"
@@ -43,6 +44,8 @@ func Execute(args []string) int {
 		err = cmdRun(rest)
 	case "chat":
 		err = cmdChat(rest)
+	case "init":
+		err = cmdInit(rest)
 	case "auth":
 		err = cmdAuth(rest)
 	case "config":
@@ -82,6 +85,7 @@ Usage:
 Commands:
   run [prompt]      Run a single agent task (reads stdin if no prompt)
   chat              Start an interactive chat session
+  init              Scaffold an AGENTS.md project-context file
   auth              Manage provider credentials (login/list/logout)
   config            Show the merged configuration and its sources
   mcp               Manage MCP servers (list/tools)
@@ -99,6 +103,11 @@ Common flags (run/chat):
       --no-session               Do not persist a session (run only)
       --plan                     Read-only plan mode (no edits or shell)
       --max-steps <n>            Cap agent iterations
+  -q, --quiet                    Suppress streaming UI (run only)
+  -o, --output <text|json>       Print a machine-readable result (run only)
+
+Prompt references:
+  @path/to/file   In a run/chat prompt, inlines that file's contents.
 
 Environment:
   ANTHROPIC_API_KEY, OPENAI_API_KEY   Provider credentials
@@ -117,6 +126,9 @@ type app struct {
 	clients []*mcp.Client
 	ui      *ui.Printer
 	task    *taskTool
+	memory  []memory.Doc
+	// lastAssistant captures the final assistant text of a run for --output.
+	lastAssistant strings.Builder
 }
 
 // setup loads config and assembles tools, skills, MCP servers and the prompt.
@@ -162,10 +174,12 @@ func setup(ctx context.Context, enableMCP bool) (*app, error) {
 		}
 	}
 
+	memDocs := memory.Collect(root, filepath.Dir(config.GlobalPath()))
 	sys := prompt.Build(prompt.Params{
-		WorkspaceRoot: root,
-		OS:            runtime.GOOS,
-		SkillCatalog:  skill.Catalog(skills),
+		WorkspaceRoot:  root,
+		OS:             runtime.GOOS,
+		SkillCatalog:   skill.Catalog(skills),
+		ProjectContext: memory.Render(memDocs),
 	})
 
 	pr := ui.New(os.Stderr, cfg.Theme, ui.ColorEnabled(os.Stderr))
@@ -198,6 +212,7 @@ func setup(ctx context.Context, enableMCP bool) (*app, error) {
 		clients: clients,
 		ui:      pr,
 		task:    taskT,
+		memory:  memDocs,
 	}, nil
 }
 
