@@ -100,11 +100,25 @@ func (p *Printer) ColorOn() bool { return p.color }
 
 // style wraps s in the SGR code unless color is disabled or code is empty.
 func (p *Printer) style(code, s string) string {
-	if !p.color || code == "" || code == "0" {
+	return SGR(code, s, p.color)
+}
+
+// SGR wraps s in an ANSI SGR sequence when on is true and code is non-empty.
+// It is the package-level form of the Printer's styling, reused by the tui
+// package so both render identically.
+func SGR(code, s string, on bool) string {
+	if !on || code == "" || code == "0" {
 		return s
 	}
 	return esc + code + "m" + s + esc + "0m"
 }
+
+// DisplayWidth returns the printable width of s, ignoring ANSI escape
+// sequences. Exposed for layout code in other packages.
+func DisplayWidth(s string) int { return displayWidth(s) }
+
+// ToolIcon returns the glyph used to mark a tool invocation.
+func ToolIcon(name string) string { return toolIcon(name) }
 
 // Sprint helpers return styled strings.
 func (p *Printer) Heading(s string) string { return p.style(p.theme.Heading, s) }
