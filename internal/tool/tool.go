@@ -45,6 +45,20 @@ func (r *Registry) Get(name string) (Tool, bool) {
 	return t, ok
 }
 
+// Unregister removes a tool by name (no-op if absent).
+func (r *Registry) Unregister(name string) { delete(r.tools, name) }
+
+// Clone returns a shallow copy sharing the same Tool instances. Mutating the
+// clone's membership (e.g. Unregister) does not affect the original — handy for
+// giving a sub-agent a reduced tool set.
+func (r *Registry) Clone() *Registry {
+	c := NewRegistry()
+	for n, t := range r.tools {
+		c.tools[n] = t
+	}
+	return c
+}
+
 // Names returns the sorted tool names.
 func (r *Registry) Names() []string {
 	names := make([]string, 0, len(r.tools))
