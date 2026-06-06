@@ -64,6 +64,35 @@ frameworks. It compiles offline into a single static binary.
 
 ## Install
 
+### Download a prebuilt binary (no build needed)
+
+Grab the binary for your OS from the
+[**latest release**](https://github.com/defomok-max/Ties/releases/latest) —
+Windows, macOS and Linux (Intel + ARM) are all there.
+
+**Windows** — download `ties-windows-amd64.exe`, rename it to `ties.exe`, then:
+
+```powershell
+.\ties.exe version
+.\ties.exe auth login anthropic
+.\ties.exe chat --tui
+```
+
+Drop `ties.exe` in a folder on your `PATH` to call `ties` from anywhere.
+
+**macOS / Linux:**
+
+```bash
+chmod +x ties-linux-amd64
+sudo mv ties-linux-amd64 /usr/local/bin/ties
+ties version
+```
+
+(`SHA256SUMS.txt` in the release lets you verify the download. On macOS, if
+Gatekeeper complains: `xattr -d com.apple.quarantine ./ties-darwin-arm64`.)
+
+### Build from source
+
 You only need **Go 1.23+** and **git**. There are no other dependencies — Ties
 builds offline into one static binary.
 
