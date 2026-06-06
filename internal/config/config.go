@@ -63,6 +63,10 @@ type Config struct {
 	MaxToolOutput int `json:"maxToolOutput,omitempty"`
 	// Retries is the number of automatic retries on transient provider errors.
 	Retries int `json:"retries,omitempty"`
+	// MaxCostUSD optionally caps the estimated spend of a single run (0 = off).
+	MaxCostUSD float64 `json:"maxCostUSD,omitempty"`
+	// MaxTokens optionally caps total tokens consumed by a single run (0 = off).
+	MaxTokens int `json:"maxTokens,omitempty"`
 	// Providers holds per-provider credentials keyed by provider name.
 	Providers map[string]ProviderConfig `json:"providers,omitempty"`
 	// Permission rules: map of "tool" or "tool:pattern" -> allow|ask|deny.
@@ -177,6 +181,12 @@ func (c *Config) merge(o *Config) {
 	if o.Retries != 0 {
 		c.Retries = o.Retries
 	}
+	if o.MaxCostUSD != 0 {
+		c.MaxCostUSD = o.MaxCostUSD
+	}
+	if o.MaxTokens != 0 {
+		c.MaxTokens = o.MaxTokens
+	}
 	if len(o.Models) > 0 {
 		c.Models = o.Models
 	}
@@ -236,11 +246,15 @@ func applyEnv(cfg *Config) {
 	// Provider keys via well-known env vars.
 	setProviderKey(cfg, "anthropic", firstEnv("TIES_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"))
 	setProviderKey(cfg, "openai", firstEnv("TIES_OPENAI_API_KEY", "OPENAI_API_KEY"))
+	setProviderKey(cfg, "gemini", firstEnv("TIES_GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"))
 	if v := os.Getenv("ANTHROPIC_BASE_URL"); v != "" {
 		setProviderBaseURL(cfg, "anthropic", v)
 	}
 	if v := os.Getenv("OPENAI_BASE_URL"); v != "" {
 		setProviderBaseURL(cfg, "openai", v)
+	}
+	if v := os.Getenv("GEMINI_BASE_URL"); v != "" {
+		setProviderBaseURL(cfg, "gemini", v)
 	}
 }
 
