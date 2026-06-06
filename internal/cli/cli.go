@@ -154,6 +154,9 @@ type app struct {
 	// tui, when non-nil, is the active full-screen interface; agent callbacks
 	// route their output to it instead of the line-oriented printer.
 	tui *tui.Screen
+	// live, when non-nil, is the active interactive chat screen (raw-mode,
+	// mouse-aware). Agent callbacks route output to it ahead of tui/printer.
+	live liveSink
 	// lastAssistant captures the final assistant text of a run for --output.
 	lastAssistant strings.Builder
 }
