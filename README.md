@@ -50,11 +50,17 @@ frameworks. It compiles offline into a single static binary.
   contents are inlined for the agent automatically.
 - 🤖 **Scriptable runs** — `--quiet` silences the UI and `--output json` prints
   a machine-readable result (final text, session id, usage, cost) for CI/pipes.
-- 🎨 **Beautiful, dependency-free TUI** — themes (`dark` / `light` / `mono`),
+- 💬 **OpenCode-style chat** — just run `ties chat` (or pick *Start chat* in the
+  menu) for a polished full-screen experience: streamed assistant replies with
+  syntax-highlighted markdown, role-labelled message blocks, tool-call lines, a
+  rounded **input box** with a real cursor and inline editing, a **slash-command
+  popup** (`/help`, `/model`, `/tools`, `/clear`…) you can navigate with the
+  keyboard *or* click, **mouse-wheel scrollback**, an in-screen **permission
+  prompt** for tool approvals, and a live status bar (model · mode · tokens ·
+  cost). Press `ctrl+c` to interrupt a run or quit. All pure stdlib; it falls
+  back to a line UI where raw mode isn't available.
+- 🎨 **Beautiful, dependency-free styling** — themes (`dark` / `light` / `mono`),
   banner, spinner, colored tool lines and diffs, boxes; honors `NO_COLOR`.
-  `ties chat --tui` opens a **full-screen interface**: a fixed header, a
-  scrolling transcript with syntax-highlighted code blocks, and a live status
-  bar (token/cost metering + spinner) — all in pure stdlib.
 - 🛠️ **Built-in tools** — `read`, `write`, `edit`, `multiedit`, `patch`,
   `list`, `glob`, `grep`, `tree`, `bash`, `webfetch` and a `todo` planner, all
   confined to the workspace root, with output-truncation budgets.
@@ -192,7 +198,7 @@ That's it. A few more ways to drive it:
 # One-shot task in the current repo (it reads, edits and runs commands for you)
 ties run "add a --version flag and update the README"
 
-# Plain interactive chat (line UI instead of full-screen)
+# Interactive chat (full-screen OpenCode-style UI when on a terminal)
 ties chat
 
 # Pick a different model on the fly
