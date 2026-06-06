@@ -70,10 +70,14 @@ Grab the binary for your OS from the
 [**latest release**](https://github.com/defomok-max/Ties/releases/latest) —
 Windows, macOS and Linux (Intel + ARM) are all there.
 
-**Windows** — download `ties-windows-amd64.exe`, rename it to `ties.exe`, then:
+**Windows** — download `ties-windows-amd64.exe` and rename it to `ties.exe`.
+Then just **double-click it** (or run `.\ties.exe` in PowerShell): it opens the
+interactive menu and walks you through setup — the window stays open instead of
+flashing closed.
 
 ```powershell
-.\ties.exe version
+.\ties.exe                # opens the menu (setup wizard + chat)
+# or drive it directly:
 .\ties.exe auth login anthropic
 .\ties.exe chat --tui
 ```
@@ -140,11 +144,23 @@ ties --help
 
 ## Quick start
 
-Get going in two steps — it feels just like Claude Code:
+The easiest way — just run it with no arguments:
+
+```bash
+ties
+```
+
+That opens an **interactive menu**. On first launch it walks you through a quick
+setup wizard (pick a provider, paste your API key), then drops you into a home
+menu where you can start a chat, run a one-off task, choose a model or manage
+keys. On Windows you can even double-click `ties.exe` — the menu keeps the
+window open instead of flashing and closing.
+
+Prefer to drive it directly? It's two steps, just like Claude Code:
 
 ```bash
 # 1. Add a provider key (stored in ~/.config/ties/ties.json) — pick any one:
-ties auth login anthropic           # prompts for the key, no echo
+ties auth login anthropic           # prompts for the key
 #   …or just export an env var instead:
 export ANTHROPIC_API_KEY=sk-...     # or OPENAI_API_KEY / GEMINI_API_KEY
 
@@ -184,6 +200,7 @@ Tips for a smooth console experience:
 
 | Command | Description |
 | --- | --- |
+| `ties` / `ties menu` | Open the interactive menu (setup wizard + launcher) |
 | `ties run [prompt]` | Run a single agent task (reads stdin if no prompt) |
 | `ties chat` | Interactive chat session |
 | `ties init` | Scaffold an `AGENTS.md` project-context file |
