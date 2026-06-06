@@ -94,6 +94,7 @@ func DefaultRegistry(root string) *Registry {
 	r.Register(newBashTool(root))
 	r.Register(newMultieditTool(root))
 	r.Register(newPatchTool(root))
+	r.Register(newTreeTool(root))
 	r.Register(newWebfetchTool())
 	return r
 }
