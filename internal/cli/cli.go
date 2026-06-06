@@ -106,6 +106,7 @@ Common flags (run/chat):
       --plan                     Read-only plan mode (no edits or shell)
       --tdd                      Test-driven mode (write failing test first)
       --max-steps <n>            Cap agent iterations
+      --tui                      Full-screen interface (chat only)
   -q, --quiet                    Suppress streaming UI (run only)
   -o, --output <text|json>       Print a machine-readable result (run only)
 
