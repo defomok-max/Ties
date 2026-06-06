@@ -25,6 +25,15 @@ frameworks. It compiles offline into a single static binary.
   cost from a built-in pricing table.
 - 🛑 **Run budgets** — optional `maxCostUSD` / `maxTokens` ceilings stop a
   runaway agent before it burns through your wallet or context.
+- 🧫 **Sub-agents** — the `task` tool spawns a scoped child agent for a focused
+  subtask; it shares your tools but keeps its own short transcript and draws
+  from the parent's remaining budget.
+- 📝 **Plan mode** — `--plan` makes a run read-only (edits and shell disabled)
+  so the agent proposes a concrete plan before touching anything.
+- ⏱️ **Per-tool timeouts** — `toolTimeout` caps how long any single tool call
+  may run, so a hung command can't stall the whole session.
+- 📤 **Session export** — `ties session export <id> --format md|html` turns a
+  transcript into a shareable Markdown or standalone HTML page.
 - 🎨 **Beautiful, dependency-free TUI** — themes (`dark` / `light` / `mono`),
   banner, spinner, colored tool lines and diffs, boxes; honors `NO_COLOR`.
 - 🛠️ **Built-in tools** — `read`, `write`, `edit`, `multiedit`, `patch`,
@@ -75,13 +84,15 @@ ties run -m openai/gpt-4o "explain internal/agent/agent.go"
 | `ties config [path]` | Show merged config and its sources |
 | `ties mcp list/tools` | Inspect MCP servers and discovered tools |
 | `ties session list/show <id>` | Inspect transcripts |
+| `ties session export <id> [--format md\|html]` | Export a transcript to share |
 | `ties skill list/show <name>` | Inspect skills |
 | `ties tools` | List built-in tools |
 | `ties models` | List providers and the default model |
 | `ties version` | Print version |
 
 Common flags for `run`/`chat`: `-m/--model`, `-y/--yes` (auto-approve tools),
-`--resume <id>`, `--no-session`, `--max-steps <n>`.
+`--resume <id>`, `--no-session`, `--plan` (read-only plan mode),
+`--max-steps <n>`.
 
 ## Configuration
 
@@ -99,6 +110,7 @@ working directory → environment variables.
   "retries": 2,             // auto-retries on 429 / 5xx (backoff + jitter)
   "maxCostUSD": 0,          // 0 = off; stop the run past this estimated spend
   "maxTokens": 0,           // 0 = off; stop the run past this many tokens
+  "toolTimeout": 0,         // 0 = off; max seconds any single tool call may run
   "theme": "dark",          // dark | light | mono | auto
   "providers": {
     "anthropic": { "apiKey": "sk-...", "baseUrl": "https://api.anthropic.com" },
