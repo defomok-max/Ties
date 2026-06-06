@@ -28,8 +28,14 @@ type agentFlags struct {
 	theme     string
 	noColor   bool
 	plan      bool
+	quiet     bool
+	output    string
 	rest      []string
 }
+
+// scripting reports whether this run should suppress interactive UI and stream
+// nothing to stdout (so a machine-readable result is the only stdout).
+func (f agentFlags) scripting() bool { return f.quiet || f.output == "json" }
 
 func parseAgentFlags(args []string) (agentFlags, error) {
 	f := agentFlags{}
@@ -69,6 +75,14 @@ func parseAgentFlags(args []string) (agentFlags, error) {
 			f.noColor = true
 		case "--plan":
 			f.plan = true
+		case "-q", "--quiet":
+			f.quiet = true
+		case "-o", "--output":
+			v, err := next()
+			if err != nil {
+				return f, err
+			}
+			f.output = v
 		case "--max-steps":
 			v, err := next()
 			if err != nil {
@@ -104,6 +118,9 @@ func cmdRun(args []string) error {
 	if err != nil {
 		return err
 	}
+	if flags.output != "" && flags.output != "text" && flags.output != "json" {
+		return fmt.Errorf("--output must be \"text\" or \"json\"")
+	}
 	ctx := context.Background()
 	a, err := setup(ctx, true)
 	if err != nil {
@@ -111,6 +128,10 @@ func cmdRun(args []string) error {
 	}
 	defer a.close()
 	a.applyUITheme(flags)
+	if flags.scripting() {
+		// Silence the interactive UI so stdout carries only the result.
+		a.ui = ui.New(io.Discard, "mono", false)
+	}
 
 	p, model, err := a.buildProvider(flags.model)
 	if err != nil {
@@ -125,6 +146,7 @@ func cmdRun(args []string) error {
 	if input == "" {
 		return fmt.Errorf("no prompt provided (pass it as an argument or via stdin)")
 	}
+	input = expandMentions(a.root, input)
 
 	var sess *session.Session
 	if !flags.noSession {
@@ -148,12 +170,45 @@ func cmdRun(args []string) error {
 	if err := ag.Run(ctx, input); err != nil {
 		return err
 	}
+
+	sessID := ""
+	if sess != nil {
+		sessID = sess.Meta.ID
+	}
+	switch flags.output {
+	case "json":
+		return a.printJSONResult(model, sessID, usage)
+	default:
+		if flags.quiet {
+			fmt.Println(strings.TrimSpace(a.lastAssistant.String()))
+			return nil
+		}
+	}
 	fmt.Println()
 	a.printUsage(model, usage)
 	if sess != nil {
 		a.ui.Println(a.ui.Dim("session " + sess.Meta.ID))
 	}
 	return nil
+}
+
+// printJSONResult emits a single machine-readable object summarising the run.
+func (a *app) printJSONResult(model, sessID string, u *usageMeter) error {
+	out := map[string]any{
+		"model":   model,
+		"session": sessID,
+		"final":   strings.TrimSpace(a.lastAssistant.String()),
+		"usage": map[string]int{
+			"inputTokens":  u.in,
+			"outputTokens": u.out,
+		},
+	}
+	if cost, ok := pricing.Estimate(model, u.in, u.out); ok {
+		out["costUSD"] = cost
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
 }
 
 func cmdChat(args []string) error {
@@ -195,6 +250,9 @@ func cmdChat(args []string) error {
 	a.ui.Banner("terminal AI coding agent")
 	a.ui.Printf(" %s  %s\n", a.ui.Heading("model"), model)
 	a.ui.Printf(" %s  %s\n", a.ui.Heading("session"), sess.Meta.ID)
+	if n := len(a.memory); n > 0 {
+		a.ui.Printf(" %s  %d file(s) loaded\n", a.ui.Heading("context"), n)
+	}
 	a.ui.Println(a.ui.Dim(" /help for commands, /exit to quit"))
 
 	in := bufio.NewScanner(os.Stdin)
@@ -214,7 +272,7 @@ func cmdChat(args []string) error {
 			}
 			continue
 		}
-		if err := ag.Run(ctx, line); err != nil {
+		if err := ag.Run(ctx, expandMentions(a.root, line)); err != nil {
 			a.ui.ErrorLine(err.Error())
 		}
 		fmt.Println()
@@ -232,6 +290,7 @@ func (a *app) handleSlash(line, model string, usage *usageMeter) bool {
 			"/help            show this help",
 			"/tools           list available tools",
 			"/skills          list discovered skills",
+			"/context         list loaded project-context files",
 			"/model           show the active model",
 			"/usage           show token usage & est. cost",
 			"/clear           clear the screen",
@@ -245,6 +304,13 @@ func (a *app) handleSlash(line, model string, usage *usageMeter) bool {
 		}
 		for _, s := range a.skills {
 			a.ui.Printf("%s  %s\n", a.ui.Heading(s.Name), a.ui.Dim(s.Description))
+		}
+	case "/context":
+		if len(a.memory) == 0 {
+			a.ui.Println(a.ui.Dim("(no AGENTS.md / CLAUDE.md / TIES.md found)"))
+		}
+		for _, d := range a.memory {
+			a.ui.Println(a.ui.Heading(d.Path))
 		}
 	case "/model":
 		a.ui.Println(model)
@@ -288,6 +354,8 @@ func (a *app) newAgent(p provider.Provider, model string, sess *session.Session,
 			spin = nil
 		}
 	}
+	a.lastAssistant.Reset()
+	scripting := flags.scripting()
 	ag := &agent.Agent{
 		Provider:      p,
 		Model:         model,
@@ -301,7 +369,15 @@ func (a *app) newAgent(p provider.Provider, model string, sess *session.Session,
 		EstimateCost:  pricing.Estimate,
 		OnText: func(delta string) {
 			stopSpin()
-			fmt.Print(delta)
+			if !scripting {
+				fmt.Print(delta)
+			}
+		},
+		OnAssistantDone: func(text string) {
+			if strings.TrimSpace(text) != "" {
+				a.lastAssistant.Reset()
+				a.lastAssistant.WriteString(text)
+			}
 		},
 		OnToolStart: func(name, args string) {
 			stopSpin()
@@ -319,9 +395,14 @@ func (a *app) newAgent(p provider.Provider, model string, sess *session.Session,
 			usage.out += u.OutputTokens
 		},
 	}
-	if flags.yes {
+	switch {
+	case flags.yes:
 		ag.Approve = func(_, _ string) bool { return true }
-	} else {
+	case scripting:
+		// Non-interactive: there is no TTY to prompt, so deny anything that
+		// would require asking. Use --yes for unattended runs that must edit.
+		ag.Approve = func(_, _ string) bool { return false }
+	default:
 		ag.Approve = a.approvePrompt
 	}
 	if a.cfg.ToolTimeout > 0 {
