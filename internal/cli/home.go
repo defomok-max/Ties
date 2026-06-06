@@ -36,10 +36,10 @@ func cmdMenu(_ []string) error { return runHome() }
 // menu can read keystrokes and paint a UI.
 func interactiveTTY() bool { return isTerminal(os.Stdin) && isTerminal(os.Stdout) }
 
-// runHome is the friendly launcher shown when you start `ties` with no command
-// (or via `ties menu`): a first-run setup wizard when no provider is configured,
-// then a simple numbered menu — chat, run a task, pick a model, manage keys.
-func runHome() error {
+// runHomeLine is the line-based fallback launcher used when the terminal cannot
+// be driven interactively (no raw mode / not a TTY). The mouse-clickable
+// version lives in home_screen.go (runHome dispatches to it when possible).
+func runHomeLine() error {
 	pr := ui.New(os.Stdout, themeName(), ui.ColorEnabled(os.Stdout))
 	in := bufio.NewReader(os.Stdin)
 
