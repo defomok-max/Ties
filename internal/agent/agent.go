@@ -23,6 +23,9 @@ type Agent struct {
 	Session     *session.Session
 	MaxSteps    int
 	Temperature float64
+	// MaxToolOutput caps the characters of a tool result stored and sent back
+	// to the model (0 = unlimited). Display callbacks still see the full text.
+	MaxToolOutput int
 
 	// OnText streams assistant text deltas.
 	OnText func(delta string)
@@ -71,7 +74,7 @@ func (a *Agent) Run(ctx context.Context, userInput string) error {
 			}
 			if err := a.appendMessage(provider.Message{
 				Role:       provider.RoleTool,
-				Content:    res.Content,
+				Content:    a.clamp(res.Content),
 				ToolCallID: tc.ID,
 				IsError:    res.IsError,
 			}); err != nil {
@@ -145,6 +148,19 @@ func (a *Agent) runTool(ctx context.Context, tc provider.ToolCall) tool.Result {
 		return tool.Result{Content: err.Error(), IsError: true}
 	}
 	return res
+}
+
+// clamp truncates s to MaxToolOutput characters, keeping the head and tail and
+// noting how much was elided, so a huge file can't blow the context window.
+func (a *Agent) clamp(s string) string {
+	limit := a.MaxToolOutput
+	if limit <= 0 || len(s) <= limit {
+		return s
+	}
+	head := limit * 2 / 3
+	tail := limit - head
+	elided := len(s) - head - tail
+	return s[:head] + fmt.Sprintf("\n\n… [%d characters truncated] …\n\n", elided) + s[len(s)-tail:]
 }
 
 func (a *Agent) messages() []provider.Message {
