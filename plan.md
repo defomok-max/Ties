@@ -109,7 +109,15 @@ execution → final answer):
   `system_instruction`, `functionCall`/`functionResponse` mapping,
   `usageMetadata`→usage, retryable `APIError`). Registered as `gemini/…`; Gemini
   prices added to the pricing table.
-- Still planned: native Bedrock wire format; a fuller pricing/context catalog.
+- ✅ **AWS Bedrock provider** (`internal/provider/bedrock`) — Anthropic Claude
+  on Bedrock via SigV4-signed `InvokeModel` (non-streaming), with the single
+  JSON response adapted into the agent's streaming event model. Credentials from
+  the standard AWS env vars; region from the provider `baseUrl` or
+  `AWS_REGION`/`AWS_DEFAULT_REGION`. SigV4 signer + wire conversion are
+  unit-tested (incl. an httptest server); the live network path needs real AWS
+  credentials to exercise end-to-end. Registered as `bedrock/…`.
+- Still planned: Bedrock's binary event-stream (true token streaming) and a
+  fuller pricing/context catalog.
 
 ### 4.4 Richer tools ✅
 - Done: tool output-truncation budget (`maxToolOutput`); `webfetch`
@@ -119,20 +127,36 @@ execution → final answer):
   (`toolTimeout`, wraps each tool call in a deadline context); structured
   **`tree`** (depth-limited directory map, skips `.git`/`node_modules`).
 
-### 4.5 MCP depth ⬜
-- HTTP/SSE transport in addition to stdio; resources & prompts (not just tools);
-  `ties mcp add` to scaffold config; capability negotiation and reconnection.
+### 4.5 MCP depth ✅ (HTTP transport + scaffolder)
+- ✅ **Streamable HTTP transport** (`internal/mcp/http.go`) alongside stdio:
+  JSON-RPC POSTed to one endpoint, parsing either `application/json` or
+  `text/event-stream` (SSE) responses, capturing/reusing `Mcp-Session-Id`, with
+  best-effort `DELETE` teardown. Selected when a server has a `url`. A
+  transport-agnostic `mcp.Server` interface backs both transports.
+- ✅ **`ties mcp add` / `ties mcp remove`** scaffold the global config —
+  `ties mcp add <name> --url <url> [--header K:V]` (HTTP) or
+  `ties mcp add <name> -- <command> [args...]` (stdio).
+- Still planned: resources & prompts (not just tools); capability negotiation and
+  auto-reconnection.
 
-### 4.6 Skills depth ⬜
-- `references/` + `scripts/` progressive disclosure; per-skill allowed tools;
-  a `ties skill add` scaffolder; project vs. global vs. bundled precedence.
+### 4.6 Skills depth ✅ (scaffolder)
+- ✅ **`ties skill add <name>`** scaffolds `skills/<name>/SKILL.md` with valid
+  frontmatter (`--force` to overwrite, name validation) so it's discovered on the
+  next run.
+- Still planned: per-skill allowed tools; project vs. global vs. bundled
+  precedence ordering. (`references/`+`scripts/` progressive disclosure already
+  works via the `skill` tool.)
 
 ### 4.7 Agent features (the "unique" layer) 🚧
 - ✅ **Sub-agents:** the `task` tool spawns a scoped child agent for a subtask —
   shares provider/tools (minus `task`, no recursion)/permissions, fresh short
   transcript, its own step cap, draws from and folds spend back into the
   parent's remaining budget (`agent.RemainingBudget`/`AddSpent`).
-- **Ralph loops:** bounded autonomous "keep going until done/criteria" mode.
+- ✅ **Ralph loops:** `--loop` runs the agent in a bounded, repeating loop that
+  re-checks and continues until it prints the `TIES_TASK_COMPLETE` marker, an
+  `--until <text>` phrase appears in the final message, or `--max-loops`
+  (default 12) is hit. The shared session means each iteration sees prior
+  progress; the loop note is injected into the system prompt.
 - ✅ **Budgets:** hard token/$ ceilings per run with graceful stop —
   `maxCostUSD` / `maxTokens` config; the agent accounts usage after each turn
   and stops cleanly when a ceiling is reached (`agent.Budget`, `agent.Spent()`).
@@ -140,7 +164,9 @@ execution → final answer):
   via `agent.DenyTools`, prompt augmented) so the agent proposes before editing.
 - ✅ **Session export:** `ties session export <id> --format md|html` renders a
   shareable transcript (`session.Export`).
-- **TDD mode:** write test → run → implement → green loop.
+- ✅ **TDD mode:** `--tdd` augments the system prompt to enforce the
+  red→green→refactor discipline (write a failing test first, confirm it fails,
+  implement the minimum to pass, then refactor while keeping tests green).
 - **Voice in/out** and **pair-agents** remain planned.
 
 ### 4.8 Quality & packaging 🚧
