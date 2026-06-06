@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/defomok-max/Ties/internal/config"
@@ -297,6 +298,39 @@ func cmdModels(_ []string) error {
 		return err
 	}
 	fmt.Println("Default model: " + cfg.Model)
-	fmt.Println("Registered providers: " + strings.Join(provider.Available(), ", "))
+	if len(cfg.Models) > 0 {
+		fmt.Println("Fallback chain: " + strings.Join(cfg.Models, " → "))
+	}
+	fmt.Println("Built-in providers: " + strings.Join(provider.Available(), ", "))
+
+	// Configured providers (built-in + custom), with key status and models.
+	names := make([]string, 0, len(cfg.Providers))
+	for n := range cfg.Providers {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	if len(names) > 0 {
+		fmt.Println("\nConfigured providers:")
+		for _, n := range names {
+			pc := cfg.Providers[n]
+			kind := "built-in"
+			if pc.Type != "" {
+				kind = "custom:" + pc.Type
+			}
+			key := "no key"
+			if pc.APIKey != "" {
+				key = "key set"
+			}
+			label := n
+			if pc.Label != "" {
+				label = pc.Label
+			}
+			fmt.Printf("  %-14s [%s, %s]", label, kind, key)
+			if len(pc.Models) > 0 {
+				fmt.Printf("  models: %s", strings.Join(pc.Models, ", "))
+			}
+			fmt.Println()
+		}
+	}
 	return nil
 }
