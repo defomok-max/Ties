@@ -28,13 +28,14 @@ func init() {
 		if base == "" {
 			base = defaultBaseURL
 		}
-		return &client{apiKey: o.APIKey, baseURL: strings.TrimRight(base, "/"), http: &http.Client{Timeout: 0}}, nil
+		return &client{apiKey: o.APIKey, baseURL: strings.TrimRight(base, "/"), headers: o.Headers, http: &http.Client{Timeout: 0}}, nil
 	})
 }
 
 type client struct {
 	apiKey  string
 	baseURL string
+	headers map[string]string
 	http    *http.Client
 }
 
@@ -104,6 +105,9 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	httpReq.Header.Set("content-type", "application/json")
 	httpReq.Header.Set("x-api-key", c.apiKey)
 	httpReq.Header.Set("anthropic-version", apiVersion)
+	for k, v := range c.headers {
+		httpReq.Header.Set(k, v)
+	}
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
