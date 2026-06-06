@@ -80,25 +80,32 @@ execution → final answer):
 
 ## 4. Roadmap (next vertical slices)
 
-### 4.1 TUI 🚧
-- Rich interactive chat UI (currently a readline-style REPL). Streaming render,
-  scrollback, syntax highlighting, diff previews for `edit`/`write`, an inline
-  permission prompt, model/cost status bar. Likely a hand-rolled ANSI renderer
-  to keep the zero-dependency promise, or an optional Bubble Tea build tag.
+### 4.1 TUI ✅ (first pass)
+- Done: dependency-free `internal/ui` — themes (`dark`/`light`/`mono`), banner,
+  braille spinner, colored tool lines + icons, red/green diff previews for
+  `edit`/`write`, boxes, `NO_COLOR`/`FORCE_COLOR`/TTY detection, a token+cost
+  status line, and chat slash-commands (`/help /tools /skills /model /usage
+  /clear /exit`). Still planned: full-screen scrollback renderer, syntax
+  highlighting, inline (non-line) permission prompt.
 
-### 4.2 Resilience ⬜
-- Auto model-fallback + retries with exponential backoff + jitter, driven by
-  `APIError.Retryable()`. Configurable fallback chain (`model`, `models: [...]`).
+### 4.2 Resilience ✅
+- Done: `internal/provider/resilient` — retries with exponential backoff +
+  jitter on retryable errors (`APIError.Retryable()`), and an ordered
+  model-fallback chain (`models: [...]`). Per-attempt + fallback callbacks
+  surface in the UI.
 
-### 4.3 More providers ⬜
-- Google Gemini, local (Ollama / OpenAI-compatible), Azure OpenAI, Bedrock.
-- A `models.dev`-style catalog with context-window + pricing metadata so the
-  status bar can show real cost.
+### 4.3 More providers ✅ (custom-provider system)
+- Done: user-defined custom providers via config `type: openai|anthropic` +
+  `baseUrl` + `apiKey` + custom `headers`, covering OpenRouter, Groq, Together,
+  local Ollama (smart `/v1` handling, optional key), Azure-style gateways.
+  `internal/pricing` gives best-effort cost from a built-in table.
+- Still planned: native Gemini + Bedrock wire formats; a fuller pricing/context
+  catalog.
 
-### 4.4 Richer tools ⬜
-- `webfetch` (read a URL), `patch` (unified-diff apply), `todo` (task list),
-  `multiedit` (atomic multi-hunk edits), structured `tree` view.
-- Per-tool timeouts and output truncation budgets.
+### 4.4 Richer tools 🚧
+- Done: tool output-truncation budget (`maxToolOutput`).
+- Planned: `webfetch`, `patch` (unified-diff apply), `todo`, `multiedit`,
+  structured `tree`; per-tool timeouts.
 
 ### 4.5 MCP depth ⬜
 - HTTP/SSE transport in addition to stdio; resources & prompts (not just tools);
@@ -133,12 +140,17 @@ permissions) is built in from the start, not bolted on. Sessions are plain JSONL
 — debuggable and replayable. MCP + skills are first-class, matching Claude
 Code's extensibility story.
 
-**Gaps / risks to tackle next.** (1) The UX is a plain REPL — the biggest
-visible gap vs. Claude Code/OpenCode is the TUI. (2) No retry/fallback yet, so a
-429 currently fails the run. (3) No cost/token accounting surfaced to the user.
-(4) Tool output isn't truncated, so a huge file can blow the context. (5) Glob is
-a hand-rolled matcher — fine, but needs more tests. Items 1–4 are the highest
-leverage and are scheduled in §4.1–4.4.
+**Resolved since the first slice.** The four highest-leverage gaps are now
+shipped: a styled themed UI with spinner/diffs (§4.1), retries + model fallback
+(§4.2), a custom-provider system + cost/token metering (§4.3), and tool-output
+truncation (§4.4).
+
+**Gaps / risks to tackle next.** (1) The UI is still line-oriented, not a
+full-screen renderer — no scrollback management or syntax highlighting yet.
+(2) Pricing/context catalog is a small static table; unknown models just skip
+cost. (3) Mid-stream provider errors aren't retried (only pre-stream), by
+design. (4) Glob is a hand-rolled matcher — fine, but deserves more tests.
+These are scheduled in §4.1, §4.3 and §4.7.
 
 ---
 
