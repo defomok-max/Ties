@@ -27,6 +27,7 @@ import (
 
 	// Register providers via their init() side effects.
 	_ "github.com/defomok-max/Ties/internal/provider/anthropic"
+	_ "github.com/defomok-max/Ties/internal/provider/bedrock"
 	_ "github.com/defomok-max/Ties/internal/provider/gemini"
 	_ "github.com/defomok-max/Ties/internal/provider/openai"
 )
@@ -88,9 +89,9 @@ Commands:
   init              Scaffold an AGENTS.md project-context file
   auth              Manage provider credentials (login/list/logout)
   config            Show the merged configuration and its sources
-  mcp               Manage MCP servers (list/tools)
+  mcp               Manage MCP servers (list/add/remove/tools)
   session           Inspect sessions (list/show/export)
-  skill             Inspect skills (list/show)
+  skill             Inspect skills (list/show/add)
   tools             List the built-in tools
   models            List available providers and the default model
   version           Print the version
@@ -102,15 +103,22 @@ Common flags (run/chat):
       --resume <id>              Resume an existing session
       --no-session               Do not persist a session (run only)
       --plan                     Read-only plan mode (no edits or shell)
+      --tdd                      Test-driven mode (write failing test first)
       --max-steps <n>            Cap agent iterations
   -q, --quiet                    Suppress streaming UI (run only)
   -o, --output <text|json>       Print a machine-readable result (run only)
+
+Autonomous loop (run only):
+      --loop                     Keep iterating until the goal is verified done
+      --max-loops <n>            Cap loop iterations (default 12)
+      --until <text>             Stop when the final message contains <text>
 
 Prompt references:
   @path/to/file   In a run/chat prompt, inlines that file's contents.
 
 Environment:
   ANTHROPIC_API_KEY, OPENAI_API_KEY   Provider credentials
+  AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION   Bedrock credentials
   TIES_MODEL                          Default model override
 `)
 }
@@ -123,7 +131,7 @@ type app struct {
 	skills  []*skill.Skill
 	perm    *permission.Engine
 	system  string
-	clients []*mcp.Client
+	clients []mcp.Server
 	ui      *ui.Printer
 	task    *taskTool
 	memory  []memory.Doc
@@ -151,13 +159,19 @@ func setup(ctx context.Context, enableMCP bool) (*app, error) {
 	taskT := newTaskTool()
 	reg.Register(taskT)
 
-	var clients []*mcp.Client
+	var clients []mcp.Server
 	if enableMCP {
 		for name, srv := range cfg.MCP {
-			if !srv.IsEnabled() || srv.Command == "" {
+			if !srv.IsEnabled() || (srv.Command == "" && srv.URL == "") {
 				continue
 			}
-			c, cerr := mcp.Start(ctx, name, srv.Command, srv.Args, srv.Env)
+			var c mcp.Server
+			var cerr error
+			if srv.IsHTTP() {
+				c, cerr = mcp.StartHTTP(ctx, name, srv.URL, srv.Headers)
+			} else {
+				c, cerr = mcp.Start(ctx, name, srv.Command, srv.Args, srv.Env)
+			}
 			if cerr != nil {
 				fmt.Fprintf(os.Stderr, "ties: mcp %s failed to start: %v\n", name, cerr)
 				continue
@@ -240,7 +254,8 @@ func (a *app) makeProvider(model string) (provider.Provider, string, error) {
 		return nil, "", err
 	}
 	// A built-in endpoint with no key and no custom base cannot authenticate.
-	if pc.APIKey == "" && pc.BaseURL == "" {
+	// Bedrock is exempt: it uses AWS credentials from the environment.
+	if pc.APIKey == "" && pc.BaseURL == "" && kind != "bedrock" {
 		return nil, "", fmt.Errorf("no API key for provider %q — run `ties auth login %s` or set the env var", name, name)
 	}
 	p = resilient.Retrying(p, resilient.RetryOptions{
