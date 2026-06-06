@@ -230,6 +230,40 @@ func cmdSession(args []string) error {
 		defer func() { _ = s.Close() }()
 		fmt.Println(s.Render())
 		return nil
+	case "export":
+		rest := args[1:]
+		format := "md"
+		var id string
+		for i := 0; i < len(rest); i++ {
+			switch rest[i] {
+			case "--format", "-f":
+				if i+1 < len(rest) {
+					format = rest[i+1]
+					i++
+				}
+			default:
+				if id == "" {
+					id = rest[i]
+				}
+			}
+		}
+		if id == "" {
+			return fmt.Errorf("usage: ties session export <id> [--format md|html]")
+		}
+		s, err := store.Open(id)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = s.Close() }()
+		out, err := s.Export(format)
+		if err != nil {
+			return err
+		}
+		fmt.Print(out)
+		if !strings.HasSuffix(out, "\n") {
+			fmt.Println()
+		}
+		return nil
 	default:
 		return fmt.Errorf("unknown session subcommand %q", args[0])
 	}
