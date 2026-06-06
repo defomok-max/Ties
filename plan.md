@@ -85,13 +85,22 @@ execution → final answer):
 
 ## 4. Roadmap (next vertical slices)
 
-### 4.1 TUI ✅ (first pass)
-- Done: dependency-free `internal/ui` — themes (`dark`/`light`/`mono`), banner,
-  braille spinner, colored tool lines + icons, red/green diff previews for
+### 4.1 TUI ✅ (full-screen)
+- Done (first pass): dependency-free `internal/ui` — themes (`dark`/`light`/`mono`),
+  banner, braille spinner, colored tool lines + icons, red/green diff previews for
   `edit`/`write`, boxes, `NO_COLOR`/`FORCE_COLOR`/TTY detection, a token+cost
-  status line, and chat slash-commands (`/help /tools /skills /model /usage
-  /clear /exit`). Still planned: full-screen scrollback renderer, syntax
-  highlighting, inline (non-line) permission prompt.
+  status line, and chat slash-commands.
+- ✅ **Full-screen interface** (`internal/tui`, `ties chat --tui`): alternate
+  screen buffer, an immediate-mode renderer (`Model.Render` is pure/testable),
+  a fixed header, a bottom-aligned scrolling transcript with scrollback, a live
+  status bar (braille spinner + grouped token/cost metering), and a cooked-mode
+  prompt pinned to the last row. Syntax highlighting (`highlight.go`) colors
+  fenced code blocks (Go/Python/JS/Bash keywords, strings, numbers, comments),
+  markdown headings/bullets and inline `code`. ANSI-aware word-wrap (`wrap.go`),
+  TIOCGWINSZ size detection (build-tagged, env/80×24 fallback). The permission
+  prompt is handled inline within the frame. Agent output is routed through a
+  thread-safe `Screen.Update`; falls back to the line UI when stdout is not a
+  TTY. Pure logic + the screen lifecycle are unit-tested (race-clean).
 
 ### 4.2 Resilience ✅
 - Done: `internal/provider/resilient` — retries with exponential backoff +
@@ -110,14 +119,18 @@ execution → final answer):
   `usageMetadata`→usage, retryable `APIError`). Registered as `gemini/…`; Gemini
   prices added to the pricing table.
 - ✅ **AWS Bedrock provider** (`internal/provider/bedrock`) — Anthropic Claude
-  on Bedrock via SigV4-signed `InvokeModel` (non-streaming), with the single
-  JSON response adapted into the agent's streaming event model. Credentials from
-  the standard AWS env vars; region from the provider `baseUrl` or
-  `AWS_REGION`/`AWS_DEFAULT_REGION`. SigV4 signer + wire conversion are
-  unit-tested (incl. an httptest server); the live network path needs real AWS
-  credentials to exercise end-to-end. Registered as `bedrock/…`.
-- Still planned: Bedrock's binary event-stream (true token streaming) and a
-  fuller pricing/context catalog.
+  on Bedrock via SigV4-signed requests. Credentials from the standard AWS env
+  vars; region from the provider `baseUrl` or `AWS_REGION`/`AWS_DEFAULT_REGION`.
+  Registered as `bedrock/…`.
+- ✅ **True token streaming** — by default Bedrock uses
+  `InvokeModelWithResponseStream` and a hand-written decoder for the binary
+  `application/vnd.amazon.eventstream` framing (`eventstream.go`: prelude +
+  headers + payload + CRC32 IEEE checks), unwrapping each `chunk` to the inner
+  Anthropic streaming event for token-by-token output. Set
+  `TIES_BEDROCK_NO_STREAM=1` to use the buffered `InvokeModel` path instead.
+  Both paths plus the event-stream framing (round-trip, multi-frame, CRC and
+  truncation errors, exception frames) are unit-tested with httptest.
+- Still planned: a fuller pricing/context catalog.
 
 ### 4.4 Richer tools ✅
 - Done: tool output-truncation budget (`maxToolOutput`); `webfetch`
@@ -212,12 +225,16 @@ layer (§4.9) brings Ties to parity with the reference CLIs: auto-loaded
 references, a structured `tree` tool (§4.4) and scriptable `--quiet` /
 `--output json` runs (§4.8).
 
-**Gaps / risks to tackle next.** (1) The UI is still line-oriented, not a
-full-screen renderer — no scrollback management or syntax highlighting yet.
-(2) Pricing/context catalog is a small static table; unknown models just skip
-cost. (3) Mid-stream provider errors aren't retried (only pre-stream), by
-design. (4) Glob is a hand-rolled matcher — fine, but deserves more tests.
-These are scheduled in §4.1, §4.3 and §4.7.
+Most recently, the UI gained a **full-screen `--tui` mode** (alt-screen,
+scrollback, syntax highlighting, live status bar — §4.1) and Bedrock gained
+**true binary-event-stream token streaming** (§4.3).
+
+**Gaps / risks to tackle next.** (1) Pricing/context catalog is a small static
+table; unknown models just skip cost. (2) Mid-stream provider errors aren't
+retried (only pre-stream), by design. (3) Glob is a hand-rolled matcher — fine,
+but deserves more tests. (4) The `--tui` mode reads input in cooked line mode
+(no per-keystroke editing/history); a raw-mode line editor is a possible future
+step. These are scheduled in §4.3 and §4.7.
 
 ---
 
