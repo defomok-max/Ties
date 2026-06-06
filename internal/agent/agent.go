@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/defomok-max/Ties/internal/permission"
 	"github.com/defomok-max/Ties/internal/provider"
@@ -33,6 +34,14 @@ type Agent struct {
 	// EstimateCost converts a model turn's tokens into USD (ok=false if the
 	// model's price is unknown). Used only for the cost budget.
 	EstimateCost func(model string, inTok, outTok int) (usd float64, ok bool)
+
+	// ToolTimeout caps how long a single tool call may run (0 = no limit). On
+	// timeout the tool sees a cancelled context and the model gets an error.
+	ToolTimeout time.Duration
+
+	// DenyTools names tools that are hard-blocked regardless of the permission
+	// engine — used by plan mode to enforce a read-only run.
+	DenyTools map[string]bool
 
 	// OnText streams assistant text deltas.
 	OnText func(delta string)
@@ -154,6 +163,9 @@ func (a *Agent) runTool(ctx context.Context, tc provider.ToolCall) tool.Result {
 	if !ok {
 		return tool.Result{Content: "unknown tool: " + tc.Name, IsError: true}
 	}
+	if a.DenyTools[tc.Name] {
+		return tool.Result{Content: fmt.Sprintf("%s is disabled in plan mode (read-only)", tc.Name), IsError: true}
+	}
 	target := extractTarget(tc.Arguments)
 	decision := permission.Ask
 	if a.Perm != nil {
@@ -170,11 +182,42 @@ func (a *Agent) runTool(ctx context.Context, tc provider.ToolCall) tool.Result {
 	if a.OnToolStart != nil {
 		a.OnToolStart(tc.Name, string(tc.Arguments))
 	}
-	res, err := t.Run(ctx, tc.Arguments)
+	runCtx := ctx
+	if a.ToolTimeout > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, a.ToolTimeout)
+		defer cancel()
+	}
+	res, err := t.Run(runCtx, tc.Arguments)
 	if err != nil {
+		if runCtx.Err() == context.DeadlineExceeded {
+			return tool.Result{Content: fmt.Sprintf("%s timed out after %s", tc.Name, a.ToolTimeout), IsError: true}
+		}
 		return tool.Result{Content: err.Error(), IsError: true}
 	}
 	return res
+}
+
+// RemainingBudget returns a Budget representing what is left of a.Budget after
+// what has already been spent (used to bound a spawned sub-agent). Unlimited
+// dimensions stay unlimited.
+func (a *Agent) RemainingBudget() Budget {
+	b := Budget{}
+	if a.Budget.MaxUSD > 0 {
+		if r := a.Budget.MaxUSD - a.spentUSD; r > 0 {
+			b.MaxUSD = r
+		} else {
+			b.MaxUSD = 0.000001 // effectively exhausted
+		}
+	}
+	if a.Budget.MaxTokens > 0 {
+		if r := a.Budget.MaxTokens - a.spentTokens; r > 0 {
+			b.MaxTokens = r
+		} else {
+			b.MaxTokens = 1
+		}
+	}
+	return b
 }
 
 // clamp truncates s to MaxToolOutput characters, keeping the head and tail and
@@ -217,6 +260,13 @@ func (a *Agent) checkBudget() error {
 
 // Spent reports the running totals accumulated during Run.
 func (a *Agent) Spent() (usd float64, tokens int) { return a.spentUSD, a.spentTokens }
+
+// AddSpent folds an external spend (e.g. a sub-agent's) into this agent's
+// running totals so the parent budget accounts for delegated work.
+func (a *Agent) AddSpent(usd float64, tokens int) {
+	a.spentUSD += usd
+	a.spentTokens += tokens
+}
 
 func (a *Agent) messages() []provider.Message {
 	if a.Session != nil {
