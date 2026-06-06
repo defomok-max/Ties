@@ -30,6 +30,10 @@ type agentFlags struct {
 	plan      bool
 	quiet     bool
 	output    string
+	tdd       bool
+	loop      bool
+	maxLoops  int
+	until     string
 	rest      []string
 }
 
@@ -75,6 +79,27 @@ func parseAgentFlags(args []string) (agentFlags, error) {
 			f.noColor = true
 		case "--plan":
 			f.plan = true
+		case "--tdd":
+			f.tdd = true
+		case "--loop":
+			f.loop = true
+		case "--max-loops":
+			v, err := next()
+			if err != nil {
+				return f, err
+			}
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				return f, fmt.Errorf("--max-loops: %w", err)
+			}
+			f.maxLoops = n
+		case "--until":
+			v, err := next()
+			if err != nil {
+				return f, err
+			}
+			f.until = v
+			f.loop = true
 		case "-q", "--quiet":
 			f.quiet = true
 		case "-o", "--output":
@@ -167,8 +192,14 @@ func cmdRun(args []string) error {
 
 	usage := &usageMeter{}
 	ag := a.newAgent(p, model, sess, flags, usage)
-	if err := ag.Run(ctx, input); err != nil {
-		return err
+	var runErr error
+	if flags.loop {
+		runErr = a.runRalph(ctx, ag, input, flags)
+	} else {
+		runErr = ag.Run(ctx, input)
+	}
+	if runErr != nil {
+		return runErr
 	}
 
 	sessID := ""
@@ -414,6 +445,13 @@ func (a *app) newAgent(p provider.Provider, model string, sess *session.Session,
 		}
 		ag.System += planModeNote
 		a.ui.Println(a.ui.Warn("· plan mode — read-only, edits disabled"))
+	}
+	if flags.tdd {
+		ag.System += tddModeNote
+		a.ui.Println(a.ui.Accent("· TDD mode — test first, then implement"))
+	}
+	if flags.loop {
+		ag.System += ralphNote
 	}
 	a.wireTask(ag, p, model, usage)
 	return ag
