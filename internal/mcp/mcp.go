@@ -19,6 +19,20 @@ import (
 
 const protocolVersion = "2024-11-05"
 
+// Server is a transport-agnostic MCP connection (stdio or HTTP) from which the
+// agent can discover and call tools.
+type Server interface {
+	// Tools returns tool.Tool adapters for everything the server exposes.
+	Tools(ctx context.Context) ([]tool.Tool, error)
+	// Close terminates the connection.
+	Close() error
+}
+
+// toolCaller is the slice of a connection a RemoteTool needs to invoke a tool.
+type toolCaller interface {
+	CallTool(ctx context.Context, name string, args json.RawMessage) (tool.Result, error)
+}
+
 // Client is a connection to one MCP server.
 type Client struct {
 	name   string
@@ -238,7 +252,7 @@ func (c *Client) Close() error {
 
 // RemoteTool adapts an MCP tool to the tool.Tool interface.
 type RemoteTool struct {
-	client      *Client
+	client      toolCaller
 	localName   string
 	remoteName  string
 	description string
