@@ -27,6 +27,13 @@ type Agent struct {
 	// to the model (0 = unlimited). Display callbacks still see the full text.
 	MaxToolOutput int
 
+	// Budget, when set, stops the run once a spend/usage ceiling is reached so
+	// a runaway loop can't burn unlimited tokens or money.
+	Budget Budget
+	// EstimateCost converts a model turn's tokens into USD (ok=false if the
+	// model's price is unknown). Used only for the cost budget.
+	EstimateCost func(model string, inTok, outTok int) (usd float64, ok bool)
+
 	// OnText streams assistant text deltas.
 	OnText func(delta string)
 	// OnToolStart fires before a tool runs.
@@ -42,7 +49,21 @@ type Agent struct {
 
 	// local holds the transcript when no Session is attached.
 	local []provider.Message
+
+	// spent accumulates across the run for budget enforcement.
+	spentUSD    float64
+	spentTokens int
 }
+
+// Budget caps how much a single Run may consume. A zero field means "no limit"
+// for that dimension.
+type Budget struct {
+	MaxUSD    float64 // total estimated USD across all model turns
+	MaxTokens int     // total input+output tokens across all model turns
+}
+
+// Empty reports whether no budget limit is configured.
+func (b Budget) Empty() bool { return b.MaxUSD <= 0 && b.MaxTokens <= 0 }
 
 // Run executes one user turn to completion (possibly many tool steps).
 func (a *Agent) Run(ctx context.Context, userInput string) error {
@@ -63,6 +84,9 @@ func (a *Agent) Run(ctx context.Context, userInput string) error {
 		}
 		if a.OnAssistantDone != nil {
 			a.OnAssistantDone(assistant.Content)
+		}
+		if err := a.checkBudget(); err != nil {
+			return err
 		}
 		if len(assistant.ToolCalls) == 0 {
 			return nil // model is done
@@ -110,8 +134,11 @@ func (a *Agent) streamOnce(ctx context.Context) (provider.Message, error) {
 				msg.ToolCalls = append(msg.ToolCalls, *ev.ToolCall)
 			}
 		case provider.EventUsage:
-			if ev.Usage != nil && a.OnUsage != nil {
-				a.OnUsage(*ev.Usage)
+			if ev.Usage != nil {
+				a.accountUsage(*ev.Usage)
+				if a.OnUsage != nil {
+					a.OnUsage(*ev.Usage)
+				}
 			}
 		case provider.EventError:
 			return provider.Message{}, ev.Err
@@ -162,6 +189,34 @@ func (a *Agent) clamp(s string) string {
 	elided := len(s) - head - tail
 	return s[:head] + fmt.Sprintf("\n\n… [%d characters truncated] …\n\n", elided) + s[len(s)-tail:]
 }
+
+// accountUsage adds a turn's tokens (and cost, if priceable) to the running
+// totals used for budget enforcement.
+func (a *Agent) accountUsage(u provider.Usage) {
+	a.spentTokens += u.InputTokens + u.OutputTokens
+	if a.EstimateCost != nil {
+		if usd, ok := a.EstimateCost(a.Model, u.InputTokens, u.OutputTokens); ok {
+			a.spentUSD += usd
+		}
+	}
+}
+
+// checkBudget returns an error when a configured spend/usage ceiling is hit.
+func (a *Agent) checkBudget() error {
+	if a.Budget.Empty() {
+		return nil
+	}
+	if a.Budget.MaxTokens > 0 && a.spentTokens >= a.Budget.MaxTokens {
+		return fmt.Errorf("token budget reached (%d/%d tokens) — stopping", a.spentTokens, a.Budget.MaxTokens)
+	}
+	if a.Budget.MaxUSD > 0 && a.spentUSD >= a.Budget.MaxUSD {
+		return fmt.Errorf("cost budget reached (est. $%.4f/$%.4f) — stopping", a.spentUSD, a.Budget.MaxUSD)
+	}
+	return nil
+}
+
+// Spent reports the running totals accumulated during Run.
+func (a *Agent) Spent() (usd float64, tokens int) { return a.spentUSD, a.spentTokens }
 
 func (a *Agent) messages() []provider.Message {
 	if a.Session != nil {
