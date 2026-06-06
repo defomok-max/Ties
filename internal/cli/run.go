@@ -16,6 +16,7 @@ import (
 	"github.com/defomok-max/Ties/internal/provider"
 	"github.com/defomok-max/Ties/internal/session"
 	"github.com/defomok-max/Ties/internal/tool"
+	"github.com/defomok-max/Ties/internal/tui"
 	"github.com/defomok-max/Ties/internal/ui"
 )
 
@@ -34,6 +35,7 @@ type agentFlags struct {
 	loop      bool
 	maxLoops  int
 	until     string
+	tui       bool
 	rest      []string
 }
 
@@ -81,6 +83,8 @@ func parseAgentFlags(args []string) (agentFlags, error) {
 			f.plan = true
 		case "--tdd":
 			f.tdd = true
+		case "--tui":
+			f.tui = true
 		case "--loop":
 			f.loop = true
 		case "--max-loops":
@@ -276,6 +280,11 @@ func cmdChat(args []string) error {
 	defer func() { _ = sess.Close() }()
 
 	usage := &usageMeter{}
+
+	if flags.tui && isTerminal(os.Stdout) && isTerminal(os.Stdin) {
+		return a.runTUIChat(ctx, flags, p, model, sess, usage)
+	}
+
 	ag := a.newAgent(p, model, sess, flags, usage)
 
 	a.ui.Banner("terminal AI coding agent")
@@ -309,6 +318,122 @@ func cmdChat(args []string) error {
 		fmt.Println()
 	}
 	return nil
+}
+
+// isTerminal reports whether f is connected to a character device (a TTY).
+func isTerminal(f *os.File) bool {
+	if f == nil {
+		return false
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+// runTUIChat drives the full-screen interface. Input is read line-by-line in
+// cooked mode (the prompt sits at the bottom of the frame); agent output is
+// routed to the screen through the app's tui field.
+func (a *app) runTUIChat(ctx context.Context, flags agentFlags, p provider.Provider, model string, sess *session.Session, usage *usageMeter) error {
+	color := a.ui.ColorOn()
+	screen := tui.NewScreen(os.Stdout, os.Stdout, a.ui.Theme(), color)
+	screen.Model().SetMeta(model, sess.Meta.ID)
+	if n := len(a.memory); n > 0 {
+		screen.Model().AddNote(fmt.Sprintf("loaded %d context file(s) · /help for commands", n))
+	} else {
+		screen.Model().AddNote("/help for commands · /exit to quit")
+	}
+
+	a.tui = screen
+	defer func() { a.tui = nil }()
+
+	ag := a.newAgent(p, model, sess, flags, usage)
+
+	screen.Start()
+	defer screen.Stop()
+
+	in := bufio.NewScanner(os.Stdin)
+	in.Buffer(make([]byte, 0, 64<<10), 4<<20)
+	for {
+		if !in.Scan() {
+			break
+		}
+		line := strings.TrimSpace(in.Text())
+		if line == "" {
+			screen.Repaint()
+			continue
+		}
+		if strings.HasPrefix(line, "/") {
+			quit, handled := a.handleSlashTUI(line, model, usage)
+			if quit {
+				return nil
+			}
+			if !handled {
+				screen.Update(func(m *tui.Model) { m.AddNote("unknown command; /help for the list") })
+			}
+			continue
+		}
+		screen.Update(func(m *tui.Model) {
+			m.AddUser(line)
+			m.SetWorking(true)
+		})
+		if err := ag.Run(ctx, expandMentions(a.root, line)); err != nil {
+			screen.Update(func(m *tui.Model) { m.AddError(err.Error()) })
+		}
+		screen.Update(func(m *tui.Model) {
+			m.EndAssistant()
+			m.SetWorking(false)
+		})
+	}
+	return nil
+}
+
+// handleSlashTUI handles slash-commands inside the full-screen interface,
+// rendering their output as transcript notes. It returns (quit, handled).
+func (a *app) handleSlashTUI(line, model string, usage *usageMeter) (quit, handled bool) {
+	cmd := strings.Fields(line)[0]
+	add := func(s string) { a.tui.Update(func(m *tui.Model) { m.AddNote(s) }) }
+	switch cmd {
+	case "/exit", "/quit":
+		return true, true
+	case "/help":
+		add(strings.Join([]string{
+			"/help    show commands     /tools   list tools",
+			"/skills  list skills        /context loaded context files",
+			"/model   active model       /usage   token usage & cost",
+			"/clear   clear transcript   /exit    quit",
+		}, "\n"))
+	case "/tools":
+		add(strings.Join(a.reg.Names(), ", "))
+	case "/skills":
+		if len(a.skills) == 0 {
+			add("(no skills)")
+		}
+		for _, s := range a.skills {
+			add(s.Name + " — " + s.Description)
+		}
+	case "/context":
+		if len(a.memory) == 0 {
+			add("(no AGENTS.md / CLAUDE.md / TIES.md found)")
+		}
+		for _, d := range a.memory {
+			add(d.Path)
+		}
+	case "/model":
+		add(model)
+	case "/usage":
+		l := fmt.Sprintf("tokens: %d in / %d out", usage.in, usage.out)
+		if cost, ok := pricing.Estimate(model, usage.in, usage.out); ok {
+			l += fmt.Sprintf("  ·  est. $%.4f", cost)
+		}
+		add(l)
+	case "/clear":
+		a.tui.Update(func(m *tui.Model) { m.Clear() })
+	default:
+		return false, false
+	}
+	return false, true
 }
 
 // handleSlash processes a chat slash-command. It returns true to quit.
@@ -372,6 +497,24 @@ func (a *app) printUsage(model string, u *usageMeter) {
 	a.ui.Println(a.ui.Dim(line))
 }
 
+// note emits a short informational line, routed to the full-screen interface
+// when active and to the line printer otherwise. style is one of "dim",
+// "accent" or "warn".
+func (a *app) note(style, s string) {
+	if a.tui != nil {
+		a.tui.Update(func(m *tui.Model) { m.AddNote(s) })
+		return
+	}
+	switch style {
+	case "accent":
+		a.ui.Println(a.ui.Accent(s))
+	case "warn":
+		a.ui.Println(a.ui.Warn(s))
+	default:
+		a.ui.Println(a.ui.Dim(s))
+	}
+}
+
 // newAgent wires callbacks for streaming output, tool approval and metering.
 func (a *app) newAgent(p provider.Provider, model string, sess *session.Session, flags agentFlags, usage *usageMeter) *agent.Agent {
 	maxSteps := a.cfg.MaxSteps
@@ -400,7 +543,13 @@ func (a *app) newAgent(p provider.Provider, model string, sess *session.Session,
 		EstimateCost:  pricing.Estimate,
 		OnText: func(delta string) {
 			stopSpin()
-			if !scripting {
+			switch {
+			case a.tui != nil:
+				a.tui.Update(func(m *tui.Model) {
+					m.SetWorking(false)
+					m.AppendAssistant(delta)
+				})
+			case !scripting:
 				fmt.Print(delta)
 			}
 		},
@@ -409,21 +558,45 @@ func (a *app) newAgent(p provider.Provider, model string, sess *session.Session,
 				a.lastAssistant.Reset()
 				a.lastAssistant.WriteString(text)
 			}
+			if a.tui != nil {
+				a.tui.Update(func(m *tui.Model) {
+					if m.LiveEmpty() && strings.TrimSpace(text) != "" {
+						m.AppendAssistant(text)
+					}
+					m.EndAssistant()
+				})
+			}
 		},
 		OnToolStart: func(name, args string) {
 			stopSpin()
+			if a.tui != nil {
+				a.tui.Update(func(m *tui.Model) {
+					m.EndAssistant()
+					m.AddTool(name, truncateArgs(args))
+					m.SetWorking(true)
+				})
+				return
+			}
 			a.ui.ToolLine(name, a.ui.Dim(truncateArgs(args)))
 			a.previewEdit(name, args)
 			spin = a.ui.StartSpinner("working…")
 		},
 		OnToolResult: func(_ string, res tool.Result) {
 			if res.IsError {
+				if a.tui != nil {
+					a.tui.Update(func(m *tui.Model) { m.AddError(firstLine(res.Content)) })
+					return
+				}
 				a.ui.ErrorLine(firstLine(res.Content))
 			}
 		},
 		OnUsage: func(u provider.Usage) {
 			usage.in += u.InputTokens
 			usage.out += u.OutputTokens
+			if a.tui != nil {
+				cost, ok := pricing.Estimate(model, usage.in, usage.out)
+				a.tui.Update(func(m *tui.Model) { m.SetUsage(usage.in, usage.out, cost, ok) })
+			}
 		},
 	}
 	switch {
@@ -444,11 +617,11 @@ func (a *app) newAgent(p provider.Provider, model string, sess *session.Session,
 			"write": true, "edit": true, "multiedit": true, "patch": true, "bash": true,
 		}
 		ag.System += planModeNote
-		a.ui.Println(a.ui.Warn("· plan mode — read-only, edits disabled"))
+		a.note("warn", "· plan mode — read-only, edits disabled")
 	}
 	if flags.tdd {
 		ag.System += tddModeNote
-		a.ui.Println(a.ui.Accent("· TDD mode — test first, then implement"))
+		a.note("accent", "· TDD mode — test first, then implement")
 	}
 	if flags.loop {
 		ag.System += ralphNote
@@ -474,7 +647,7 @@ func (a *app) wireTask(parent *agent.Agent, p provider.Provider, model string, u
 		if label == "" {
 			label = firstLine(prompt)
 		}
-		a.ui.Println(a.ui.Accent("· task → " + truncateArgs(label)))
+		a.note("accent", "· task → "+truncateArgs(label))
 
 		childSteps := parent.MaxSteps / 2
 		if childSteps < 4 {
@@ -508,7 +681,7 @@ func (a *app) wireTask(parent *agent.Agent, p provider.Provider, model string, u
 		err := child.Run(ctx, prompt)
 		cusd, ctok := child.Spent()
 		parent.AddSpent(cusd, ctok)
-		a.ui.Println(a.ui.Dim("· task done"))
+		a.note("dim", "· task done")
 		return last.String(), err
 	}
 }
@@ -539,11 +712,22 @@ func (a *app) approvePrompt(name, target string) bool {
 	if target != "" {
 		label += " (" + truncateArgs(target) + ")"
 	}
-	a.ui.Print(a.ui.Warn("allow " + label + "? [y/N] "))
+	if a.tui != nil {
+		a.tui.Update(func(m *tui.Model) {
+			m.SetWorking(false)
+			m.AddNote("allow " + label + "?  type y to approve, anything else to deny")
+		})
+	} else {
+		a.ui.Print(a.ui.Warn("allow " + label + "? [y/N] "))
+	}
 	r := bufio.NewReader(os.Stdin)
 	line, _ := r.ReadString('\n')
 	line = strings.ToLower(strings.TrimSpace(line))
-	return line == "y" || line == "yes"
+	ok := line == "y" || line == "yes"
+	if a.tui != nil && ok {
+		a.tui.Update(func(m *tui.Model) { m.SetWorking(true) })
+	}
+	return ok
 }
 
 func truncateArgs(s string) string {
